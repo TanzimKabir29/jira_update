@@ -536,7 +536,17 @@ func main() {
 	showLog := flag.Bool("log", false, "Show run history (last 20 entries)")
 	logN := flag.Int("log-n", -1, "Show last N entries of run history (0 = all)")
 	dryRun := flag.Bool("dry-run", false, "Run normally but do not update state or history")
+	reset := flag.Bool("reset", false, "Delete the state file and exit")
 	flag.Parse()
+
+	if *reset {
+		if err := os.Remove(statePath()); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintln(os.Stderr, "Error removing state file:", err)
+			os.Exit(1)
+		}
+		fmt.Println("State file removed.")
+		return
+	}
 
 	if *showLog || *logN >= 0 {
 		limit := 20

@@ -453,7 +453,20 @@ def main():
         action='store_true',
         help='Run normally but do not update state or history',
     )
+    parser.add_argument(
+        '--reset',
+        action='store_true',
+        help='Delete the state file and exit',
+    )
     args = parser.parse_args()
+
+    if args.reset:
+        if STATE_FILE.exists():
+            STATE_FILE.unlink()
+            print("State file removed.")
+        else:
+            print("No state file found.")
+        return
 
     if args.log is not None:
         print_history(args.log)
