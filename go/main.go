@@ -569,11 +569,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	var hasActivity bool
+	var hasActivity, hasError bool
 	for _, issue := range issues {
 		events, err := extractRelevantActivity(issue, since, accountID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", issue.Key, err)
+			hasError = true
 			continue
 		}
 		if len(events) == 0 {
@@ -592,6 +593,10 @@ func main() {
 		fmt.Println("No relevant activity found.")
 	}
 
-	saveLastRun(time.Now().UTC())
-	appendHistory("go", sinceType, sinceValue)
+	if hasError {
+		fmt.Fprintln(os.Stderr, "Warning: some issues could not be processed. State not updated to avoid missing activity on next run.")
+	} else {
+		saveLastRun(time.Now().UTC())
+		appendHistory("go", sinceType, sinceValue)
+	}
 }

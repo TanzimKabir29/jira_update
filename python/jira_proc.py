@@ -468,10 +468,15 @@ def main():
     issues = fetch_updated_issues(since)
 
     issue_activity = []
+    has_error = False
 
     for issue in issues:
-
-        activity = extract_relevant_activity(issue, since, account_id)
+        try:
+            activity = extract_relevant_activity(issue, since, account_id)
+        except Exception as e:
+            print(f"Warning: skipping {issue['key']}: {e}", file=sys.stderr)
+            has_error = True
+            continue
 
         if activity["events"]:
             issue_activity.append(activity)
@@ -494,9 +499,16 @@ def main():
 
             print()
 
-    now = datetime.now(timezone.utc)
-    save_last_run(now)
-    append_history("python", since_type, since_value)
+    if has_error:
+        print(
+            "Warning: some issues could not be processed. "
+            "State not updated to avoid missing activity on next run.",
+            file=sys.stderr,
+        )
+    else:
+        now = datetime.now(timezone.utc)
+        save_last_run(now)
+        append_history("python", since_type, since_value)
 
 
 if __name__ == "__main__":
