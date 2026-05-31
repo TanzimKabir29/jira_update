@@ -42,7 +42,7 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
           go build -ldflags="-X main.version=${{ github.ref_name }}" -o jira-update-${{ matrix.goos }}-${{ matrix.goarch }}${EXT} .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jira-update-${{ matrix.goos }}-${{ matrix.goarch }}
           path: go/jira-update-*
