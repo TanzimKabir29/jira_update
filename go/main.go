@@ -248,8 +248,12 @@ type Issue struct {
 	} `json:"fields"`
 }
 
-func fetchUpdatedIssues(since time.Time) ([]Issue, error) {
-	jql := fmt.Sprintf(`assignee was currentUser() AND updated >= "%s" ORDER BY updated ASC`, since.Format("2006-01-02 15:04"))
+func fetchUpdatedIssues(since time.Time, projects []string) ([]Issue, error) {
+	jql := fmt.Sprintf(`assignee was currentUser() AND updated >= "%s"`, since.Format("2006-01-02 15:04"))
+	if len(projects) > 0 {
+		jql += fmt.Sprintf(` AND project in (%s)`, strings.Join(projects, ", "))
+	}
+	jql += " ORDER BY updated ASC"
 
 	var issues []Issue
 	nextPageToken := ""
@@ -612,6 +616,7 @@ func parseSinceArg(value string) (time.Time, error) {
 
 func main() {
 	sinceFlag := flag.String("since", "", `Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"`)
+	projectFlag := flag.String("project", "", "Comma-separated project keys to filter results (e.g. PROJ or PROJ,OTHER)")
 	showLog := flag.Bool("log", false, "Show run history (last 20 entries)")
 	logN := flag.Int("log-n", -1, "Show last N entries of run history (0 = all)")
 	dryRun := flag.Bool("dry-run", false, "Run normally but do not update state or history")
@@ -682,7 +687,16 @@ func main() {
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Println()
 
-	issues, err := fetchUpdatedIssues(since)
+	var projects []string
+	if *projectFlag != "" {
+		for _, k := range strings.Split(*projectFlag, ",") {
+			if k := strings.TrimSpace(strings.ToUpper(k)); k != "" {
+				projects = append(projects, k)
+			}
+		}
+	}
+
+	issues, err := fetchUpdatedIssues(since, projects)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error fetching issues:", err)
 		os.Exit(1)

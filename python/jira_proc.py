@@ -107,11 +107,15 @@ def fetch_my_account_id():
     return account_id
 
 
-def fetch_updated_issues(since):
+def fetch_updated_issues(since, projects=None):
 
     since_str = since.strftime("%Y-%m-%d %H:%M")
 
-    jql = f'assignee was currentUser() AND updated >= "{since_str}" ORDER BY updated ASC'
+    jql = f'assignee was currentUser() AND updated >= "{since_str}"'
+    if projects:
+        keys = ", ".join(projects)
+        jql += f" AND project in ({keys})"
+    jql += " ORDER BY updated ASC"
 
     issues = []
 
@@ -487,6 +491,11 @@ def main():
         help='Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"',
     )
     parser.add_argument(
+        '--project',
+        metavar='KEYS',
+        help='Comma-separated project keys to filter results (e.g. PROJ or PROJ,OTHER)',
+    )
+    parser.add_argument(
         '--log',
         nargs='?',
         const=20,
@@ -561,7 +570,8 @@ def main():
         print("=" * 80)
         print()
 
-    issues = fetch_updated_issues(since)
+    projects = [k.strip().upper() for k in args.project.split(",")] if args.project else None
+    issues = fetch_updated_issues(since, projects=projects)
 
     issue_activity = []
     has_error = False
