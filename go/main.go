@@ -224,39 +224,49 @@ func fetchUpdatedIssues(since time.Time) ([]Issue, error) {
 	return issues, nil
 }
 
-func fetchChangelog(issueKey string) ([]struct {
+type ChangelogItem struct {
+	Field      string `json:"field"`
+	From       string `json:"from"`
+	FromString string `json:"fromString"`
+	To         string `json:"to"`
+	ToString   string `json:"toString"`
+}
+
+type ChangelogHistory struct {
 	Created string `json:"created"`
 	Author  struct {
 		DisplayName string `json:"displayName"`
 	} `json:"author"`
-	Items []struct {
-		Field      string `json:"field"`
-		From       string `json:"from"`
-		FromString string `json:"fromString"`
-		To         string `json:"to"`
-		ToString   string `json:"toString"`
-	} `json:"items"`
-}, error) {
-	body, err := jiraGet("/rest/api/3/issue/"+issueKey+"/changelog", nil)
-	if err != nil {
-		return nil, err
+	Items []ChangelogItem `json:"items"`
+}
+
+func fetchChangelog(issueKey string) ([]ChangelogHistory, error) {
+	var all []ChangelogHistory
+	startAt := 0
+
+	for {
+		params := url.Values{
+			"startAt":    {strconv.Itoa(startAt)},
+			"maxResults": {"100"},
+		}
+		body, err := jiraGet("/rest/api/3/issue/"+issueKey+"/changelog", params)
+		if err != nil {
+			return nil, err
+		}
+		var result struct {
+			Values []ChangelogHistory `json:"values"`
+			IsLast bool               `json:"isLast"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, err
+		}
+		all = append(all, result.Values...)
+		if result.IsLast {
+			break
+		}
+		startAt += len(result.Values)
 	}
-	var result struct {
-		Values []struct {
-			Created string `json:"created"`
-			Author  struct {
-				DisplayName string `json:"displayName"`
-			} `json:"author"`
-			Items []struct {
-				Field      string `json:"field"`
-				From       string `json:"from"`
-				FromString string `json:"fromString"`
-				To         string `json:"to"`
-				ToString   string `json:"toString"`
-			} `json:"items"`
-		} `json:"values"`
-	}
-	return result.Values, json.Unmarshal(body, &result)
+	return all, nil
 }
 
 // =========================================================

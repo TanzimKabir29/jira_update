@@ -151,12 +151,21 @@ def format_time(s):
     return dt.strftime("%Y-%m-%d %H:%M")
 
 def fetch_issue_changelog(issue_key):
+    all_values = []
+    start_at = 0
 
-    data = jira_get(
-        f"/rest/api/3/issue/{issue_key}/changelog"
-    )
+    while True:
+        data = jira_get(
+            f"/rest/api/3/issue/{issue_key}/changelog",
+            params={"startAt": start_at, "maxResults": 100},
+        )
+        values = data.get("values", [])
+        all_values.extend(values)
+        if data.get("isLast", True):
+            break
+        start_at += len(values)
 
-    return data.get("values", [])
+    return all_values
 
 
 # =========================================================
