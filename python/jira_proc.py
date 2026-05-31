@@ -36,10 +36,10 @@ def validate_config():
     }.items() if not v]
 
     if missing:
-        print("Error: the following required variables are not set in your .env file:")
+        print("Error: the following required variables are not set in your .env file:", file=sys.stderr)
         for key in missing:
-            print(f"  {key}")
-        print("\nCopy .env.example to .env and fill in your values.")
+            print(f"  {key}", file=sys.stderr)
+        print("\nCopy .env.example to .env and fill in your values.", file=sys.stderr)
         sys.exit(1)
 
 

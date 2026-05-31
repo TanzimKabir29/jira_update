@@ -637,11 +637,16 @@ func main() {
 	}
 
 	if *reset {
-		if err := os.Remove(statePath()); err != nil && !os.IsNotExist(err) {
+		err := os.Remove(statePath())
+		if err != nil && !os.IsNotExist(err) {
 			fmt.Fprintln(os.Stderr, "Error removing state file:", err)
 			os.Exit(1)
 		}
-		fmt.Println("State file removed.")
+		if os.IsNotExist(err) {
+			fmt.Println("No state file found.")
+		} else {
+			fmt.Println("State file removed.")
+		}
 		return
 	}
 
