@@ -25,6 +25,8 @@ JIRA_API_TOKEN = os.environ.get("JIRA_API_TOKEN", "")
 STATE_DIR = Path.home() / ".jira_update"
 STATE_FILE = STATE_DIR / "state.json"
 
+_MAX_RESULTS = 100
+
 
 def validate_config():
     missing = [k for k, v in {
@@ -120,7 +122,7 @@ def fetch_updated_issues(since):
         params = {
             "jql": jql,
             "fields": "summary,status,assignee,comment",
-            "maxResults": 100,
+            "maxResults": _MAX_RESULTS,
         }
 
         if next_page_token:
@@ -149,8 +151,7 @@ def parse_jira_time(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def format_time(s):
-    dt = parse_jira_time(s)
+def format_time(dt):
     return dt.strftime("%Y-%m-%d %H:%M")
 
 def fetch_issue_changelog(issue_key):
@@ -160,7 +161,7 @@ def fetch_issue_changelog(issue_key):
     while True:
         data = jira_get(
             f"/rest/api/3/issue/{issue_key}/changelog",
-            params={"startAt": start_at, "maxResults": 100},
+            params={"startAt": start_at, "maxResults": _MAX_RESULTS},
         )
         values = data.get("values", [])
         all_values.extend(values)
@@ -221,7 +222,7 @@ def extract_relevant_activity(issue, since, account_id):
                     relevant_events.append({
                         "time": created,
                         "text": (
-                            f"[{format_time(history['created'])}] "
+                            f"[{format_time(created)}] "
                             f"{author} changed assignee "
                             f"from '{from_name}' to '{to_name}'"
                         )
@@ -250,7 +251,7 @@ def extract_relevant_activity(issue, since, account_id):
                     relevant_events.append({
                         "time": created,
                         "text": (
-                            f"[{format_time(history['created'])}] "
+                            f"[{format_time(created)}] "
                             f"{author} changed status "
                             f"from '{from_status}' to '{to_status}'"
                         )
@@ -283,7 +284,7 @@ def extract_relevant_activity(issue, since, account_id):
             relevant_events.append({
                 "time": created,
                 "text": (
-                    f"[{format_time(comment['created'])}] "
+                    f"[{format_time(created)}] "
                     f"{author} commented"
                 )
             })

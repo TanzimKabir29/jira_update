@@ -54,12 +54,12 @@ jira-update
 ### Install
 
 ```bash
-pipx install "git+<repo-url>@<tag>#subdirectory=python"
+pipx install "git+https://github.com/TanzimKabir29/jira_update@<tag>#subdirectory=python"
 ```
 
 For example:
 ```bash
-pipx install "git+<repo-url>@v1.0.0#subdirectory=python"
+pipx install "git+https://github.com/TanzimKabir29/jira_update@v1.0.0#subdirectory=python"
 ```
 
 ### Run

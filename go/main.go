@@ -26,6 +26,8 @@ import (
 
 var version = "dev"
 
+const maxResults = 100
+
 var (
 	jiraBaseURL  string
 	jiraEmail    string
@@ -256,7 +258,7 @@ func fetchUpdatedIssues(since time.Time) ([]Issue, error) {
 		params := url.Values{
 			"jql":        {jql},
 			"fields":     {"summary,status,assignee,comment"},
-			"maxResults": {"100"},
+			"maxResults": {strconv.Itoa(maxResults)},
 		}
 		if nextPageToken != "" {
 			params.Set("nextPageToken", nextPageToken)
@@ -307,7 +309,7 @@ func fetchChangelog(issueKey string) ([]ChangelogHistory, error) {
 	for {
 		params := url.Values{
 			"startAt":    {strconv.Itoa(startAt)},
-			"maxResults": {"100"},
+			"maxResults": {strconv.Itoa(maxResults)},
 		}
 		body, err := jiraGet("/rest/api/3/issue/"+issueKey+"/changelog", params)
 		if err != nil {
