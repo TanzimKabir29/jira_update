@@ -458,6 +458,11 @@ def main():
         action='store_true',
         help='Delete the state file and exit',
     )
+    parser.add_argument(
+        '--output',
+        metavar='FORMAT',
+        help='Output format: "json" for machine-readable output',
+    )
     args = parser.parse_args()
 
     if args.reset:
@@ -490,10 +495,11 @@ def main():
         since = load_last_run()
         since_type, since_value = "state", since.isoformat()
 
-    print("=" * 80)
-    print(f"JIRA activity since {since.isoformat()}")
-    print("=" * 80)
-    print()
+    if args.output != "json":
+        print("=" * 80)
+        print(f"JIRA activity since {since.isoformat()}")
+        print("=" * 80)
+        print()
 
     issues = fetch_updated_issues(since)
 
@@ -515,19 +521,30 @@ def main():
     # OUTPUT
     # ---------------------------------------------------------
 
-    if not issue_activity:
-        print("No relevant activity found.")
+    if args.output == "json":
+        out = [
+            {
+                "key": iss["key"],
+                "summary": iss["summary"],
+                "events": [e["text"] for e in iss["events"]],
+            }
+            for iss in issue_activity
+        ]
+        print(json.dumps(out, indent=2))
 
     else:
-        for issue in issue_activity:
+        if not issue_activity:
+            print("No relevant activity found.")
+        else:
+            for issue in issue_activity:
 
-            print(f"{issue['key']} - {issue['summary']}")
-            print("-" * 80)
+                print(f"{issue['key']} - {issue['summary']}")
+                print("-" * 80)
 
-            for event in issue["events"]:
-                print(f"  • {event['text']}")
+                for event in issue["events"]:
+                    print(f"  • {event['text']}")
 
-            print()
+                print()
 
     if has_error:
         print(

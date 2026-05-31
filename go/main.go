@@ -537,6 +537,7 @@ func main() {
 	logN := flag.Int("log-n", -1, "Show last N entries of run history (0 = all)")
 	dryRun := flag.Bool("dry-run", false, "Run normally but do not update state or history")
 	reset := flag.Bool("reset", false, "Delete the state file and exit")
+	output := flag.String("output", "", `Output format: "json" for machine-readable output`)
 	flag.Parse()
 
 	if *reset {
@@ -614,7 +615,14 @@ func main() {
 	}
 	wg.Wait()
 
-	var hasActivity, hasError bool
+	type issueOutput struct {
+		Key     string   `json:"key"`
+		Summary string   `json:"summary"`
+		Events  []string `json:"events"`
+	}
+
+	var hasError bool
+	var issueActivity []issueOutput
 	for _, r := range results {
 		if r.err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", r.issue.Key, r.err)
@@ -624,17 +632,37 @@ func main() {
 		if len(r.events) == 0 {
 			continue
 		}
-		hasActivity = true
-		fmt.Printf("%s - %s\n", r.issue.Key, r.issue.Fields.Summary)
-		fmt.Println(strings.Repeat("-", 80))
-		for _, e := range r.events {
-			fmt.Printf("  • %s\n", e.Text)
+		texts := make([]string, len(r.events))
+		for i, e := range r.events {
+			texts[i] = e.Text
 		}
-		fmt.Println()
+		issueActivity = append(issueActivity, issueOutput{
+			Key:     r.issue.Key,
+			Summary: r.issue.Fields.Summary,
+			Events:  texts,
+		})
 	}
 
-	if !hasActivity {
-		fmt.Println("No relevant activity found.")
+	if *output == "json" {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if issueActivity == nil {
+			issueActivity = []issueOutput{}
+		}
+		enc.Encode(issueActivity) //nolint
+	} else {
+		if len(issueActivity) == 0 {
+			fmt.Println("No relevant activity found.")
+		} else {
+			for _, iss := range issueActivity {
+				fmt.Printf("%s - %s\n", iss.Key, iss.Summary)
+				fmt.Println(strings.Repeat("-", 80))
+				for _, e := range iss.Events {
+					fmt.Printf("  • %s\n", e)
+				}
+				fmt.Println()
+			}
+		}
 	}
 
 	if hasError {
