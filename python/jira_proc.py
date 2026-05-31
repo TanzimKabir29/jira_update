@@ -411,6 +411,22 @@ def parse_since_arg(value):
     local_tz = datetime.now().astimezone().tzinfo
     value = value.strip()
 
+    # Natural language: yesterday, monday–sunday
+    lower = value.lower()
+    if lower == "yesterday":
+        now = datetime.now(local_tz)
+        return (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+    _WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    if lower in _WEEKDAYS:
+        target = _WEEKDAYS.index(lower)
+        now = datetime.now(local_tz)
+        today = now.weekday()
+        days_back = (today - target) % 7
+        if days_back == 0:
+            days_back = 7  # last occurrence, not today
+        return (now - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
     # Relative: 1d / 2h / 30m (case-insensitive)
     m = _RELATIVE_RE.fullmatch(value)
     if m:
@@ -451,7 +467,7 @@ def parse_since_arg(value):
 
     raise ValueError(
         f"Unrecognized time format: {value!r}\n"
-        "Accepted: 9am, 14:30, 30m, 2h, 1d, \"2026-05-30 14:00\", \"2026-05-30 14:00+06:00\""
+        "Accepted: yesterday, monday–sunday, 9am, 14:30, 30m, 2h, 1d, \"2026-05-30 14:00\", \"2026-05-30 14:00+06:00\""
     )
 
 

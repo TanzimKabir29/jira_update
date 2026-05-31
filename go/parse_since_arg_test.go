@@ -209,6 +209,59 @@ func TestAbsoluteUTC(t *testing.T) {
 }
 
 // ----------------------------------------------------------
+// Natural language: yesterday, weekday names
+// ----------------------------------------------------------
+
+func startOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local).UTC()
+}
+
+func TestYesterday(t *testing.T) {
+	result, err := parseSinceArg("yesterday")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := startOfDay(time.Now().AddDate(0, 0, -1))
+	if !result.Equal(expected) {
+		t.Errorf("got %v, want %v", result, expected)
+	}
+}
+
+func TestYesterdayUppercase(t *testing.T) {
+	result, err := parseSinceArg("Yesterday")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := startOfDay(time.Now().AddDate(0, 0, -1))
+	if !result.Equal(expected) {
+		t.Errorf("got %v, want %v", result, expected)
+	}
+}
+
+func TestWeekdayReturnsLastOccurrence(t *testing.T) {
+	// Any weekday name should return a date in the past (1–7 days ago, start of day)
+	for _, day := range weekdays {
+		result, err := parseSinceArg(day)
+		if err != nil {
+			t.Fatalf("parseSinceArg(%q) error: %v", day, err)
+		}
+		now := time.Now().UTC()
+		if !result.Before(now) {
+			t.Errorf("%s: got %v which is not before now (%v)", day, result, now)
+		}
+		daysAgo := int(now.Sub(result).Hours() / 24)
+		if daysAgo < 1 || daysAgo > 7 {
+			t.Errorf("%s: expected 1–7 days ago, got %d days ago", day, daysAgo)
+		}
+		// Verify time is midnight local
+		local := result.In(time.Local)
+		if local.Hour() != 0 || local.Minute() != 0 || local.Second() != 0 {
+			t.Errorf("%s: expected midnight local, got %v", day, local)
+		}
+	}
+}
+
+// ----------------------------------------------------------
 // Invalid input
 // ----------------------------------------------------------
 

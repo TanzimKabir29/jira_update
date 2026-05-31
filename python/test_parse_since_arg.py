@@ -98,6 +98,40 @@ class TestParseSinceArg(unittest.TestCase):
         self.assertEqual(parse_since_arg("2026-05-30 14:00+00:00"), expected)
 
     # ----------------------------------------------------------
+    # Natural language: yesterday, weekday names
+    # ----------------------------------------------------------
+
+    def _start_of_day(self, dt):
+        local_tz = datetime.now().astimezone().tzinfo
+        return dt.astimezone(local_tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+    def test_yesterday(self):
+        result = parse_since_arg("yesterday")
+        expected = self._start_of_day(datetime.now(timezone.utc) - timedelta(days=1))
+        self.assertEqual(result, expected)
+
+    def test_yesterday_uppercase(self):
+        result = parse_since_arg("Yesterday")
+        expected = self._start_of_day(datetime.now(timezone.utc) - timedelta(days=1))
+        self.assertEqual(result, expected)
+
+    def test_weekday_returns_last_occurrence(self):
+        weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        now = datetime.now(timezone.utc)
+        for day in weekdays:
+            result = parse_since_arg(day)
+            self.assertLess(result, now, f"{day}: result {result} should be in the past")
+            days_ago = (now - result).days
+            self.assertGreaterEqual(days_ago, 1, f"{day}: should be at least 1 day ago")
+            self.assertLessEqual(days_ago, 7, f"{day}: should be at most 7 days ago")
+            # Verify time is midnight local
+            local_tz = datetime.now().astimezone().tzinfo
+            local_result = result.astimezone(local_tz)
+            self.assertEqual(local_result.hour, 0)
+            self.assertEqual(local_result.minute, 0)
+            self.assertEqual(local_result.second, 0)
+
+    # ----------------------------------------------------------
     # Invalid input
     # ----------------------------------------------------------
 

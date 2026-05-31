@@ -526,8 +526,28 @@ var relativeRe = regexp.MustCompile(`(?i)^(\d+)(d|h|m)$`)
 //	Time only: 9am, 9:30am, 14:30  (today, local time)
 //	Full date : 2026-05-30 14:00    (local time assumed)
 //	With tz   : 2026-05-30 14:00+06:00
+var weekdays = []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+
 func parseSinceArg(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
+
+	// Natural language: yesterday, monday–sunday
+	lower := strings.ToLower(value)
+	if lower == "yesterday" {
+		now := time.Now()
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local).AddDate(0, 0, -1).UTC(), nil
+	}
+	for target, name := range weekdays {
+		if lower == name {
+			now := time.Now()
+			today := int(now.Weekday()+6) % 7 // convert Sunday=0 to Monday=0
+			daysBack := (today - target + 7) % 7
+			if daysBack == 0 {
+				daysBack = 7 // last occurrence, not today
+			}
+			return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local).AddDate(0, 0, -daysBack).UTC(), nil
+		}
+	}
 
 	// Relative: 1d / 2h / 30m (case-insensitive)
 	if m := relativeRe.FindStringSubmatch(value); m != nil {
@@ -579,7 +599,7 @@ func parseSinceArg(value string) (time.Time, error) {
 	}
 
 	return time.Time{}, fmt.Errorf(
-		"unrecognized time format: %q\nAccepted: 9am, 14:30, 30m, 2h, 1d, \"2026-05-30 14:00\", \"2026-05-30 14:00+06:00\"",
+		"unrecognized time format: %q\nAccepted: yesterday, monday–sunday, 9am, 14:30, 30m, 2h, 1d, \"2026-05-30 14:00\", \"2026-05-30 14:00+06:00\"",
 		value,
 	)
 }
