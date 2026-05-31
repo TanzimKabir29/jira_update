@@ -397,6 +397,8 @@ def parse_since_arg(value):
             t = datetime.strptime(value.upper(), fmt)
             now = datetime.now(local_tz)
             result = now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+            if result > now:
+                result -= timedelta(days=1)
             return result.astimezone(timezone.utc)
         except ValueError:
             continue

@@ -10,11 +10,13 @@ class TestParseSinceArg(unittest.TestCase):
         self.assertLessEqual(diff, delta_seconds,
             f"{result} not within {delta_seconds}s of {expected}")
 
-    def _local_today(self, hour, minute):
+    def _local_today_or_yesterday(self, hour, minute):
         local_tz = datetime.now().astimezone().tzinfo
-        return datetime.now(local_tz).replace(
-            hour=hour, minute=minute, second=0, microsecond=0
-        ).astimezone(timezone.utc)
+        now = datetime.now(local_tz)
+        result = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if result > now:
+            result -= timedelta(days=1)
+        return result.astimezone(timezone.utc)
 
     # ----------------------------------------------------------
     # Relative — case insensitive
@@ -59,16 +61,16 @@ class TestParseSinceArg(unittest.TestCase):
     # ----------------------------------------------------------
 
     def test_time_hour_am(self):
-        self.assertEqual(parse_since_arg("9am"), self._local_today(9, 0))
+        self.assertEqual(parse_since_arg("9am"), self._local_today_or_yesterday(9, 0))
 
     def test_time_hour_minute_am(self):
-        self.assertEqual(parse_since_arg("9:30am"), self._local_today(9, 30))
+        self.assertEqual(parse_since_arg("9:30am"), self._local_today_or_yesterday(9, 30))
 
     def test_time_24h(self):
-        self.assertEqual(parse_since_arg("14:30"), self._local_today(14, 30))
+        self.assertEqual(parse_since_arg("14:30"), self._local_today_or_yesterday(14, 30))
 
     def test_time_pm(self):
-        self.assertEqual(parse_since_arg("3pm"), self._local_today(15, 0))
+        self.assertEqual(parse_since_arg("3pm"), self._local_today_or_yesterday(15, 0))
 
     # ----------------------------------------------------------
     # Absolute datetime — no timezone (local assumed)

@@ -495,6 +495,9 @@ func parseSinceArg(value string) (time.Time, error) {
 			now := time.Now()
 			result := time.Date(now.Year(), now.Month(), now.Day(),
 				t.Hour(), t.Minute(), 0, 0, time.Local)
+			if result.After(now) {
+				result = result.AddDate(0, 0, -1)
+			}
 			return result.UTC(), nil
 		}
 	}

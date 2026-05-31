@@ -17,9 +17,13 @@ func approxEqual(t *testing.T, result, expected time.Time, deltaSeconds float64)
 	}
 }
 
-func localToday(hour, minute int) time.Time {
+func localTodayOrYesterday(hour, minute int) time.Time {
 	now := time.Now()
-	return time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.Local).UTC()
+	result := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.Local)
+	if result.After(now) {
+		result = result.AddDate(0, 0, -1)
+	}
+	return result.UTC()
 }
 
 // ----------------------------------------------------------
@@ -117,8 +121,8 @@ func TestTimeHourAM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Equal(localToday(9, 0)) {
-		t.Errorf("got %v, want %v", result, localToday(9, 0))
+	if !result.Equal(localTodayOrYesterday(9, 0)) {
+		t.Errorf("got %v, want %v", result, localTodayOrYesterday(9, 0))
 	}
 }
 
@@ -127,8 +131,8 @@ func TestTimeHourMinuteAM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Equal(localToday(9, 30)) {
-		t.Errorf("got %v, want %v", result, localToday(9, 30))
+	if !result.Equal(localTodayOrYesterday(9, 30)) {
+		t.Errorf("got %v, want %v", result, localTodayOrYesterday(9, 30))
 	}
 }
 
@@ -137,8 +141,8 @@ func TestTime24h(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Equal(localToday(14, 30)) {
-		t.Errorf("got %v, want %v", result, localToday(14, 30))
+	if !result.Equal(localTodayOrYesterday(14, 30)) {
+		t.Errorf("got %v, want %v", result, localTodayOrYesterday(14, 30))
 	}
 }
 
@@ -147,8 +151,8 @@ func TestTimePM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Equal(localToday(15, 0)) {
-		t.Errorf("got %v, want %v", result, localToday(15, 0))
+	if !result.Equal(localTodayOrYesterday(15, 0)) {
+		t.Errorf("got %v, want %v", result, localTodayOrYesterday(15, 0))
 	}
 }
 
