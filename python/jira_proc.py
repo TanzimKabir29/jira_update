@@ -106,7 +106,7 @@ def fetch_updated_issues(since):
 
     since_str = since.strftime("%Y-%m-%d %H:%M")
 
-    jql = f'updated >= "{since_str}" ORDER BY updated ASC'
+    jql = f'assignee was currentUser() AND updated >= "{since_str}" ORDER BY updated ASC'
 
     issues = []
 

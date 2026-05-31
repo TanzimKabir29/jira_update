@@ -187,7 +187,7 @@ type Issue struct {
 }
 
 func fetchUpdatedIssues(since time.Time) ([]Issue, error) {
-	jql := fmt.Sprintf(`updated >= "%s" ORDER BY updated ASC`, since.Format("2006-01-02 15:04"))
+	jql := fmt.Sprintf(`assignee was currentUser() AND updated >= "%s" ORDER BY updated ASC`, since.Format("2006-01-02 15:04"))
 
 	var issues []Issue
 	nextPageToken := ""
