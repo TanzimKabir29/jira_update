@@ -281,6 +281,73 @@ def extract_relevant_activity(issue, since, account_id):
 
 
 # =========================================================
+# HISTORY
+# =========================================================
+
+HISTORY_FILE = STATE_DIR / "history.json"
+
+
+def append_history(source, since_type, since_value):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "source": source,
+        "since_type": since_type,
+        "since_value": since_value,
+    }
+    with open(HISTORY_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def print_history(limit):
+    if not HISTORY_FILE.exists():
+        print("No run history found.")
+        return
+
+    with open(HISTORY_FILE, "r") as f:
+        lines = [line.strip() for line in f if line.strip()]
+
+    entries = []
+    for line in lines:
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    entries.reverse()  # most recent first
+
+    if limit > 0:
+        entries = entries[:limit]
+
+    if not entries:
+        print("No run history found.")
+        return
+
+    local_tz = datetime.now().astimezone().tzinfo
+
+    print(f"{'#':>3}  {'Time':<16}  {'Source':<6}  Since")
+    print(f"{'--':>3}  {'----------------':<16}  {'------':<6}  {'---------------------------'}")
+
+    for i, entry in enumerate(entries, 1):
+        run_time = datetime.fromisoformat(entry["time"]).astimezone(local_tz)
+        time_str = run_time.strftime("%Y-%m-%d %H:%M")
+        source = entry.get("source", "?")
+        since_type = entry.get("since_type", "?")
+        since_value = entry.get("since_value", "")
+
+        if since_type == "arg":
+            since_str = f"arg: {since_value}"
+        else:
+            try:
+                state_time = datetime.fromisoformat(since_value).astimezone(local_tz)
+                since_str = f"state: {state_time.strftime('%Y-%m-%d %H:%M')}"
+            except (ValueError, TypeError):
+                since_str = f"state: {since_value}"
+
+        print(f"{i:>3}  {time_str:<16}  {source:<6}  {since_str}")
+
+
+# =========================================================
 # ARGUMENT PARSING
 # =========================================================
 
@@ -352,7 +419,19 @@ def main():
         metavar='TIME',
         help='Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"',
     )
+    parser.add_argument(
+        '--log',
+        nargs='?',
+        const=20,
+        type=int,
+        metavar='N',
+        help='Show run history. Optionally specify number of entries (default 20, 0 = all)',
+    )
     args = parser.parse_args()
+
+    if args.log is not None:
+        print_history(args.log)
+        return
 
     validate_config()
 
@@ -367,8 +446,10 @@ def main():
         if since > datetime.now(timezone.utc):
             print("Error: --since time cannot be in the future.", file=sys.stderr)
             sys.exit(1)
+        since_type, since_value = "arg", args.since
     else:
         since = load_last_run()
+        since_type, since_value = "state", since.isoformat()
 
     print("=" * 80)
     print(f"JIRA activity since {since.isoformat()}")
@@ -404,7 +485,9 @@ def main():
 
             print()
 
-    save_last_run(datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    save_last_run(now)
+    append_history("python", since_type, since_value)
 
 
 if __name__ == "__main__":

@@ -253,6 +253,99 @@ func fetchChangelog(issueKey string) ([]struct {
 }
 
 // =========================================================
+// HISTORY
+// =========================================================
+
+type HistoryEntry struct {
+	Time       time.Time `json:"time"`
+	Source     string    `json:"source"`
+	SinceType  string    `json:"since_type"`
+	SinceValue string    `json:"since_value"`
+}
+
+func historyPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".jira_update", "history.json")
+}
+
+func appendHistory(source, sinceType, sinceValue string) {
+	path := historyPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return
+	}
+	entry := HistoryEntry{
+		Time:       time.Now().UTC(),
+		Source:     source,
+		SinceType:  sinceType,
+		SinceValue: sinceValue,
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Write(append(data, '\n'))
+}
+
+func printHistory(limit int) {
+	data, err := os.ReadFile(historyPath())
+	if err != nil {
+		fmt.Println("No run history found.")
+		return
+	}
+
+	var entries []HistoryEntry
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var e HistoryEntry
+		if err := json.Unmarshal([]byte(line), &e); err == nil {
+			entries = append(entries, e)
+		}
+	}
+
+	// Most recent first
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+
+	// Apply limit (0 = all)
+	if limit > 0 && limit < len(entries) {
+		entries = entries[:limit]
+	}
+
+	if len(entries) == 0 {
+		fmt.Println("No run history found.")
+		return
+	}
+
+	fmt.Printf("%3s  %-16s  %-6s  %s\n", "#", "Time", "Source", "Since")
+	fmt.Printf("%3s  %-16s  %-6s  %s\n", "--", "----------------", "------", "---------------------------")
+
+	for i, e := range entries {
+		timeStr := e.Time.In(time.Local).Format("2006-01-02 15:04")
+
+		var sinceStr string
+		if e.SinceType == "arg" {
+			sinceStr = "arg: " + e.SinceValue
+		} else {
+			if t, err := time.Parse(time.RFC3339, e.SinceValue); err == nil {
+				sinceStr = "state: " + t.In(time.Local).Format("2006-01-02 15:04")
+			} else {
+				sinceStr = "state: " + e.SinceValue
+			}
+		}
+
+		fmt.Printf("%3d  %-16s  %-6s  %s\n", i+1, timeStr, e.Source, sinceStr)
+	}
+}
+
+// =========================================================
 // HELPERS
 // =========================================================
 
@@ -417,7 +510,18 @@ func parseSinceArg(value string) (time.Time, error) {
 
 func main() {
 	sinceFlag := flag.String("since", "", `Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"`)
+	showLog := flag.Bool("log", false, "Show run history (last 20 entries)")
+	logN := flag.Int("log-n", -1, "Show last N entries of run history (0 = all)")
 	flag.Parse()
+
+	if *showLog || *logN >= 0 {
+		limit := 20
+		if *logN >= 0 {
+			limit = *logN
+		}
+		printHistory(limit)
+		return
+	}
 
 	loadEnv()
 	validateConfig()
@@ -429,6 +533,7 @@ func main() {
 	}
 
 	var since time.Time
+	var sinceType, sinceValue string
 	if *sinceFlag != "" {
 		var err error
 		since, err = parseSinceArg(*sinceFlag)
@@ -440,8 +545,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Error: --since time cannot be in the future.")
 			os.Exit(1)
 		}
+		sinceType, sinceValue = "arg", *sinceFlag
 	} else {
 		since = loadLastRun()
+		sinceType, sinceValue = "state", since.Format(time.RFC3339)
 	}
 
 	fmt.Println(strings.Repeat("=", 80))
@@ -479,4 +586,5 @@ func main() {
 	}
 
 	saveLastRun(time.Now().UTC())
+	appendHistory("go", sinceType, sinceValue)
 }
