@@ -3,3 +3,5 @@ venv/
 __pycache__/
 *.pyc
 ~/.jira_update/
+go/jira-update
+go/jira-update.exe
