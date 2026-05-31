@@ -375,7 +375,7 @@ def parse_since_arg(value):
     # Time only: 9am, 9:30am, 14:30
     for fmt in ('%I%p', '%I:%M%p', '%H:%M'):
         try:
-            t = datetime.strptime(value.upper(), fmt.upper())
+            t = datetime.strptime(value.upper(), fmt)
             now = datetime.now(local_tz)
             result = now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
             return result.astimezone(timezone.utc)
