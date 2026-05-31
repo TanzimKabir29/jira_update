@@ -43,6 +43,21 @@ No Go installation required.
 jira-update
 ```
 
+### Shell completions
+
+```bash
+# bash — add to ~/.bashrc
+source /path/to/completions/jira-update.bash
+
+# zsh — copy to a directory in your $fpath
+cp completions/jira-update.zsh /usr/local/share/zsh/site-functions/_jira-update
+```
+
+```powershell
+# PowerShell — add to your $PROFILE
+. /path/to/completions/jira-update.ps1
+```
+
 ---
 
 ## Python
