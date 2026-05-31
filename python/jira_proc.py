@@ -3,11 +3,10 @@ import json
 import sys
 import requests
 from datetime import datetime, timedelta, timezone
-from collections import defaultdict
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path.home() / ".jira_update" / ".env")
 
 # =========================================================
 # CONFIG
