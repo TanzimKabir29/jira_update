@@ -86,6 +86,61 @@ func validateConfig() {
 }
 
 // =========================================================
+// INIT
+// =========================================================
+
+func runInit() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error determining home directory:", err)
+		os.Exit(1)
+	}
+	dir := filepath.Join(home, ".jira_update")
+	envFile := filepath.Join(dir, ".env")
+
+	reader := bufio.NewReader(os.Stdin)
+
+	prompt := func(label, placeholder string) string {
+		fmt.Printf("%s [%s]: ", label, placeholder)
+		line, _ := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
+		if line == "" {
+			return placeholder
+		}
+		return line
+	}
+
+	fmt.Println("Jira Update — interactive setup")
+	fmt.Println("Values will be saved to", envFile)
+	fmt.Println()
+
+	baseURL := prompt("JIRA_BASE_URL (e.g. https://your-company.atlassian.net)", "")
+	email := prompt("JIRA_EMAIL", "")
+	token := prompt("JIRA_API_TOKEN", "")
+
+	if baseURL == "" || email == "" || token == "" {
+		fmt.Fprintln(os.Stderr, "Error: all three values are required.")
+		os.Exit(1)
+	}
+
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		fmt.Fprintln(os.Stderr, "Error creating config directory:", err)
+		os.Exit(1)
+	}
+
+	contents := fmt.Sprintf("JIRA_BASE_URL=%s\nJIRA_EMAIL=%s\nJIRA_API_TOKEN=%s\n",
+		strings.TrimRight(baseURL, "/"), email, token)
+
+	if err := os.WriteFile(envFile, []byte(contents), 0600); err != nil {
+		fmt.Fprintln(os.Stderr, "Error writing .env file:", err)
+		os.Exit(1)
+	}
+
+	fmt.Println()
+	fmt.Println("Config saved to", envFile)
+}
+
+// =========================================================
 // STATE MANAGEMENT
 // =========================================================
 
@@ -541,10 +596,16 @@ func main() {
 	reset := flag.Bool("reset", false, "Delete the state file and exit")
 	output := flag.String("output", "", `Output format: "json" for machine-readable output`)
 	showVersion := flag.Bool("version", false, "Print version and exit")
+	initFlag := flag.Bool("init", false, "Interactive setup: create ~/.jira_update/.env")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println(version)
+		return
+	}
+
+	if *initFlag {
+		runInit()
 		return
 	}
 

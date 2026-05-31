@@ -369,6 +369,33 @@ def print_history(limit):
 
 
 # =========================================================
+# INIT
+# =========================================================
+
+def run_init():
+    env_file = STATE_DIR / ".env"
+    print("Jira Update — interactive setup")
+    print(f"Values will be saved to {env_file}")
+    print()
+
+    base_url = input("JIRA_BASE_URL (e.g. https://your-company.atlassian.net): ").strip().rstrip("/")
+    email = input("JIRA_EMAIL: ").strip()
+    token = input("JIRA_API_TOKEN: ").strip()
+
+    if not base_url or not email or not token:
+        print("Error: all three values are required.", file=sys.stderr)
+        sys.exit(1)
+
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(env_file, "w") as f:
+        f.write(f"JIRA_BASE_URL={base_url}\nJIRA_EMAIL={email}\nJIRA_API_TOKEN={token}\n")
+    env_file.chmod(0o600)
+
+    print()
+    print(f"Config saved to {env_file}")
+
+
+# =========================================================
 # ARGUMENT PARSING
 # =========================================================
 
@@ -470,7 +497,16 @@ def main():
         action='version',
         version=__version__,
     )
+    parser.add_argument(
+        '--init',
+        action='store_true',
+        help='Interactive setup: create ~/.jira_update/.env',
+    )
     args = parser.parse_args()
+
+    if args.init:
+        run_init()
+        return
 
     if args.reset:
         if STATE_FILE.exists():
