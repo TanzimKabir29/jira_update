@@ -20,17 +20,22 @@ Your account ID is discovered automatically — you don't need to set it.
 
 ## Go
 
-### Prerequisites
-- Go 1.21+
+No Go installation required.
 
 ### Install
 
-```bash
-cd go
-go install .
-```
+1. Download the binary for your platform from the [latest release](../../releases/latest):
+   - `jira-update-darwin-arm64` — macOS Apple Silicon
+   - `jira-update-darwin-amd64` — macOS Intel
+   - `jira-update-linux-amd64` — Linux
+   - `jira-update-windows-amd64.exe` — Windows
 
-This builds the binary and places it in `$GOPATH/bin`, which is on your PATH if you have a standard Go setup.
+2. Rename it to `jira-update` and move it onto your PATH:
+   ```bash
+   mv jira-update-darwin-arm64 jira-update
+   chmod +x jira-update
+   mv jira-update /usr/local/bin/
+   ```
 
 ### Run
 
@@ -48,14 +53,13 @@ jira-update
 
 ### Install
 
-From a cloned repo:
 ```bash
-pipx install ./python
+pipx install "git+<repo-url>@<tag>#subdirectory=python"
 ```
 
-From GitHub:
+For example:
 ```bash
-pipx install "git+<repo-url>#subdirectory=python"
+pipx install "git+<repo-url>@v1.0.0#subdirectory=python"
 ```
 
 ### Run
@@ -75,3 +79,14 @@ On each run the tool fetches all Jira issues updated since the previous run, the
 - Comments on tickets currently assigned to you
 
 The timestamp of each run is saved to `~/.jira_update/state.json`. On first run it defaults to the last 24 hours.
+
+---
+
+## Cutting a release
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+GitHub Actions will build binaries for all platforms and publish them as a GitHub Release automatically.
