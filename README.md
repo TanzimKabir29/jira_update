@@ -2,94 +2,114 @@
 
 Prints all Jira activity relevant to you since the last time you ran it — assignee changes, status changes, and comments on your tickets. Useful for daily standup prep.
 
-## Configuration
+---
 
-Create `~/.jira_update/.env` using the template below:
+## Quick start
 
+**First time only** — run the interactive setup to create your config:
+
+```bash
+jira-update --init
 ```
-JIRA_BASE_URL=https://your-company.atlassian.net
-JIRA_EMAIL=you@your-company.com
-JIRA_API_TOKEN=your_api_token_here
-```
 
-To generate an API token, go to: Atlassian Account Settings → Security → API tokens.
+This prompts for your Jira URL, email, and API token and saves them to `~/.jira_update/.env`.
 
-Your account ID is discovered automatically — you don't need to set it.
+To generate an API token: Atlassian Account Settings → Security → API tokens.
 
 ---
 
-## Go
+## Install
 
-No Go installation required.
+### macOS / Linux (recommended)
 
-### Install
+Download the binary for your platform from the [latest release](https://github.com/TanzimKabir29/jira_update/releases/latest):
 
-1. Download the binary for your platform from the [latest release](../../releases/latest):
-   - `jira-update-darwin-arm64` — macOS Apple Silicon
-   - `jira-update-darwin-amd64` — macOS Intel
-   - `jira-update-linux-amd64` — Linux
-   - `jira-update-windows-amd64.exe` — Windows
+| File | Platform |
+|------|----------|
+| `jira-update-darwin-arm64` | macOS Apple Silicon |
+| `jira-update-darwin-amd64` | macOS Intel |
+| `jira-update-linux-amd64` | Linux |
+| `jira-update-windows-amd64.exe` | Windows |
 
-2. Rename it to `jira-update` and move it onto your PATH:
-   ```bash
-   mv jira-update-darwin-arm64 jira-update
-   chmod +x jira-update
-   mv jira-update /usr/local/bin/
-   ```
-
-### Run
+Move it onto your PATH:
 
 ```bash
-jira-update
+mv jira-update-darwin-arm64 jira-update
+chmod +x jira-update
+mv jira-update /usr/local/bin/
 ```
 
-### Shell completions
+Verify the download (optional):
 
 ```bash
-# bash — add to ~/.bashrc
-source /path/to/completions/jira-update.bash
-
-# zsh — copy to a directory in your $fpath
-cp completions/jira-update.zsh /usr/local/share/zsh/site-functions/_jira-update
+# Download checksums.txt from the same release, then:
+sha256sum -c checksums.txt
 ```
 
-```powershell
-# PowerShell — add to your $PROFILE
-. /path/to/completions/jira-update.ps1
-```
+### Windows
 
----
+Download `jira-update-windows-amd64.exe`, rename it to `jira-update.exe`, and place it in a folder on your `PATH`.
 
-## Python
+### Python (alternative)
 
-### Prerequisites
-- Python 3.9+
-- [pipx](https://pipx.pypa.io/stable/installation/)
+Requires Python 3.9+ and [pipx](https://pipx.pypa.io/stable/installation/).
 
-### Install
-
-```bash
-pipx install "git+https://github.com/TanzimKabir29/jira_update@<tag>#subdirectory=python"
-```
-
-For example:
 ```bash
 pipx install "git+https://github.com/TanzimKabir29/jira_update@v1.0.0#subdirectory=python"
 ```
 
-### Run
+Replace `v1.0.0` with the version you want to install.
+
+---
+
+## Usage
+
+```
+jira-update [flags]
+
+Flags:
+  --since TIME     Override start time. Accepted formats:
+                     yesterday, monday–sunday
+                     9am, 14:30, 3pm
+                     1h, 6h, 2d
+                     "2026-05-30 14:00"
+                     "2026-05-30 14:00+06:00"
+  --project KEYS   Filter to specific projects, e.g. PROJ or PROJ,OTHER
+  --output FORMAT  Output format: json
+  --log [N]        Show run history (default 20 entries)
+  --log-n N        Show last N entries of run history (0 = all)
+  --dry-run        Run normally but do not update state or history
+  --reset          Delete the state file and exit
+  --init           Interactive setup: create ~/.jira_update/.env
+  --version        Print version and exit
+```
+
+### Examples
 
 ```bash
+# Activity since last run
 jira-update
+
+# Activity since 9am today
+jira-update --since 9am
+
+# Activity since last Monday, filtered to one project
+jira-update --since monday --project PROJ
+
+# Check what would show without advancing the state
+jira-update --dry-run
+
+# Machine-readable output
+jira-update --output json
 ```
 
 ---
 
 ## How it works
 
-On each run the tool fetches all Jira issues updated since the previous run, then filters the activity down to only what involves you:
+On each run the tool fetches all Jira issues updated since the previous run, then filters activity down to only what involves you:
 
-- Tickets assigned to or from you
+- Tickets assigned to or unassigned from you
 - Status changes on tickets currently assigned to you
 - Comments on tickets currently assigned to you
 
@@ -97,11 +117,26 @@ The timestamp of each run is saved to `~/.jira_update/state.json`. On first run 
 
 ---
 
-## Cutting a release
+## Shell completions
+
+### bash
+
+Add to `~/.bashrc`:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+source /path/to/completions/jira-update.bash
 ```
 
-GitHub Actions will build binaries for all platforms and publish them as a GitHub Release automatically.
+### zsh
+
+```bash
+cp completions/jira-update.zsh /usr/local/share/zsh/site-functions/_jira-update
+```
+
+### PowerShell
+
+Add to your `$PROFILE`:
+
+```powershell
+. /path/to/completions/jira-update.ps1
+```
