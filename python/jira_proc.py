@@ -1,6 +1,8 @@
 import os
 import json
+import re
 import sys
+import argparse
 import requests
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -279,16 +281,94 @@ def extract_relevant_activity(issue, since, account_id):
 
 
 # =========================================================
+# ARGUMENT PARSING
+# =========================================================
+
+def parse_since_arg(value):
+    """
+    Parse a --since argument into a UTC-aware datetime.
+    Accepted formats:
+      Relative : 1d, 2d, 6h
+      Time only: 9am, 9:30am, 14:30  (today, local time)
+      Full date : 2026-05-30 14:00    (local time assumed)
+      With tz   : 2026-05-30 14:00+06:00
+    """
+    local_tz = datetime.now().astimezone().tzinfo
+    value = value.strip()
+
+    # Relative: 1d / 2h / 30m (case-insensitive)
+    m = re.fullmatch(r'(\d+)(d|h|m)', value, re.IGNORECASE)
+    if m:
+        n, unit = int(m.group(1)), m.group(2).lower()
+        if n == 0:
+            raise ValueError(f"'0{m.group(2)}' is not a valid duration. Use a value greater than 0.")
+        delta = {'d': timedelta(days=n), 'h': timedelta(hours=n), 'm': timedelta(minutes=n)}[unit]
+        return datetime.now(timezone.utc) - delta
+
+    # Time only: 9am, 9:30am, 14:30
+    for fmt in ('%I%p', '%I:%M%p', '%H:%M'):
+        try:
+            t = datetime.strptime(value.upper(), fmt.upper())
+            now = datetime.now(local_tz)
+            result = now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+            return result.astimezone(timezone.utc)
+        except ValueError:
+            continue
+
+    # Full datetime — fromisoformat handles both with and without timezone
+    for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%dT%H:%M'):
+        try:
+            dt = datetime.strptime(value, fmt)
+            return dt.replace(tzinfo=local_tz).astimezone(timezone.utc)
+        except ValueError:
+            continue
+
+    # ISO with timezone offset: 2026-05-30 14:00+06:00
+    try:
+        dt = datetime.fromisoformat(value.replace(' ', 'T'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=local_tz)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        pass
+
+    raise ValueError(
+        f"Unrecognized time format: {value!r}\n"
+        "Accepted: 9am, 14:30, 30m, 2h, 1d, \"2026-05-30 14:00\", \"2026-05-30 14:00+06:00\""
+    )
+
+
+# =========================================================
 # MAIN
 # =========================================================
 
 def main():
 
+    parser = argparse.ArgumentParser(
+        description="Show Jira activity since last run or a given time."
+    )
+    parser.add_argument(
+        '--since',
+        metavar='TIME',
+        help='Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"',
+    )
+    args = parser.parse_args()
+
     validate_config()
 
     account_id = fetch_my_account_id()
 
-    since = load_last_run()
+    if args.since:
+        try:
+            since = parse_since_arg(args.since)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        if since > datetime.now(timezone.utc):
+            print("Error: --since time cannot be in the future.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        since = load_last_run()
 
     print("=" * 80)
     print(f"JIRA activity since {since.isoformat()}")

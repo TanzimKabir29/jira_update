@@ -3,13 +3,16 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -341,10 +344,81 @@ func extractRelevantActivity(issue Issue, since time.Time, accountID string) ([]
 }
 
 // =========================================================
+// ARGUMENT PARSING
+// =========================================================
+
+var relativeRe = regexp.MustCompile(`(?i)^(\d+)(d|h|m)$`)
+
+// parseSinceArg parses a --since value into a UTC time.
+// Accepted formats:
+//
+//	Relative : 1d, 2h
+//	Time only: 9am, 9:30am, 14:30  (today, local time)
+//	Full date : 2026-05-30 14:00    (local time assumed)
+//	With tz   : 2026-05-30 14:00+06:00
+func parseSinceArg(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+
+	// Relative: 1d / 2h / 30m (case-insensitive)
+	if m := relativeRe.FindStringSubmatch(value); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		if n == 0 {
+			return time.Time{}, fmt.Errorf("'%s' is not a valid duration. Use a value greater than 0.", value)
+		}
+		switch strings.ToLower(m[2]) {
+		case "d":
+			return time.Now().UTC().Add(-time.Duration(n) * 24 * time.Hour), nil
+		case "h":
+			return time.Now().UTC().Add(-time.Duration(n) * time.Hour), nil
+		case "m":
+			return time.Now().UTC().Add(-time.Duration(n) * time.Minute), nil
+		}
+	}
+
+	// Time only: 9am, 9:30am, 14:30
+	upper := strings.ToUpper(value)
+	for _, fmt := range []string{"3PM", "3:04PM", "15:04"} {
+		if t, err := time.ParseInLocation(fmt, upper, time.Local); err == nil {
+			now := time.Now()
+			result := time.Date(now.Year(), now.Month(), now.Day(),
+				t.Hour(), t.Minute(), 0, 0, time.Local)
+			return result.UTC(), nil
+		}
+	}
+
+	// Full datetime with explicit timezone offset
+	for _, fmt := range []string{
+		"2006-01-02 15:04-07:00",
+		"2006-01-02T15:04-07:00",
+		"2006-01-02 15:04Z07:00",
+		time.RFC3339,
+	} {
+		if t, err := time.Parse(fmt, value); err == nil {
+			return t.UTC(), nil
+		}
+	}
+
+	// Full datetime without timezone — assume local
+	for _, fmt := range []string{"2006-01-02 15:04", "2006-01-02T15:04"} {
+		if t, err := time.ParseInLocation(fmt, value, time.Local); err == nil {
+			return t.UTC(), nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf(
+		"unrecognized time format: %q\nAccepted: 9am, 14:30, 30m, 2h, 1d, \"2026-05-30 14:00\", \"2026-05-30 14:00+06:00\"",
+		value,
+	)
+}
+
+// =========================================================
 // MAIN
 // =========================================================
 
 func main() {
+	sinceFlag := flag.String("since", "", `Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"`)
+	flag.Parse()
+
 	loadEnv()
 	validateConfig()
 
@@ -354,7 +428,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	since := loadLastRun()
+	var since time.Time
+	if *sinceFlag != "" {
+		var err error
+		since, err = parseSinceArg(*sinceFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+			os.Exit(1)
+		}
+		if since.After(time.Now().UTC()) {
+			fmt.Fprintln(os.Stderr, "Error: --since time cannot be in the future.")
+			os.Exit(1)
+		}
+	} else {
+		since = loadLastRun()
+	}
 
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Printf("JIRA activity since %s\n", since.Format(time.RFC3339))
