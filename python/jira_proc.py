@@ -82,6 +82,7 @@ def jira_get(path, params=None):
             "Accept": "application/json",
         },
         params=params,
+        timeout=30,
     )
 
     if not response.ok:

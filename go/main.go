@@ -29,6 +29,8 @@ var (
 	jiraAPIToken string
 )
 
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
 func loadEnv() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -133,7 +135,7 @@ func jiraGet(path string, params url.Values) ([]byte, error) {
 		req.URL.RawQuery = params.Encode()
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
