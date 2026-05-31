@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -581,21 +582,38 @@ func main() {
 		os.Exit(1)
 	}
 
+	type result struct {
+		issue  Issue
+		events []Event
+		err    error
+	}
+
+	results := make([]result, len(issues))
+	var wg sync.WaitGroup
+	for i, issue := range issues {
+		wg.Add(1)
+		go func(i int, issue Issue) {
+			defer wg.Done()
+			events, err := extractRelevantActivity(issue, since, accountID)
+			results[i] = result{issue: issue, events: events, err: err}
+		}(i, issue)
+	}
+	wg.Wait()
+
 	var hasActivity, hasError bool
-	for _, issue := range issues {
-		events, err := extractRelevantActivity(issue, since, accountID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", issue.Key, err)
+	for _, r := range results {
+		if r.err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", r.issue.Key, r.err)
 			hasError = true
 			continue
 		}
-		if len(events) == 0 {
+		if len(r.events) == 0 {
 			continue
 		}
 		hasActivity = true
-		fmt.Printf("%s - %s\n", issue.Key, issue.Fields.Summary)
+		fmt.Printf("%s - %s\n", r.issue.Key, r.issue.Fields.Summary)
 		fmt.Println(strings.Repeat("-", 80))
-		for _, e := range events {
+		for _, e := range r.events {
 			fmt.Printf("  • %s\n", e.Text)
 		}
 		fmt.Println()
