@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path.home() / ".jira_update" / ".env")
 
+__version__ = "dev"
+
 _RELATIVE_RE = re.compile(r'(\d+)(d|h|m)', re.IGNORECASE)
 
 # =========================================================
@@ -462,6 +464,11 @@ def main():
         '--output',
         metavar='FORMAT',
         help='Output format: "json" for machine-readable output',
+    )
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=__version__,
     )
     args = parser.parse_args()
 

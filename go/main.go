@@ -24,6 +24,8 @@ import (
 // Copy .env.example from the repo root to that location.
 // =========================================================
 
+var version = "dev"
+
 var (
 	jiraBaseURL  string
 	jiraEmail    string
@@ -538,7 +540,13 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "Run normally but do not update state or history")
 	reset := flag.Bool("reset", false, "Delete the state file and exit")
 	output := flag.String("output", "", `Output format: "json" for machine-readable output`)
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	if *reset {
 		if err := os.Remove(statePath()); err != nil && !os.IsNotExist(err) {
