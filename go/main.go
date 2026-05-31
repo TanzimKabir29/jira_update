@@ -98,6 +98,7 @@ func loadLastRun() time.Time {
 		LastRun time.Time `json:"last_run"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
+		fmt.Fprintln(os.Stderr, "Warning: state file is corrupt, defaulting to last 24 hours.")
 		return time.Now().UTC().Add(-24 * time.Hour)
 	}
 	return s.LastRun
@@ -157,7 +158,13 @@ func fetchMyAccountID() (string, error) {
 	var me struct {
 		AccountID string `json:"accountId"`
 	}
-	return me.AccountID, json.Unmarshal(body, &me)
+	if err := json.Unmarshal(body, &me); err != nil {
+		return "", err
+	}
+	if me.AccountID == "" {
+		return "", fmt.Errorf("could not determine account ID from /rest/api/3/myself response")
+	}
+	return me.AccountID, nil
 }
 
 type Issue struct {

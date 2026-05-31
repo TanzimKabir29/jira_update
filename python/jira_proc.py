@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path.home() / ".jira_update" / ".env")
 
+_RELATIVE_RE = re.compile(r'(\d+)(d|h|m)', re.IGNORECASE)
+
 # =========================================================
 # CONFIG
 # =========================================================
@@ -44,16 +46,19 @@ def validate_config():
 def load_last_run():
     """
     Returns datetime of previous successful run.
-    Falls back to last 24h if no state file exists.
+    Falls back to last 24h if no state file exists or is corrupt.
     """
 
     if not STATE_FILE.exists():
         return datetime.now(timezone.utc) - timedelta(days=1)
 
-    with open(STATE_FILE, "r") as f:
-        data = json.load(f)
-
-    return datetime.fromisoformat(data["last_run"])
+    try:
+        with open(STATE_FILE, "r") as f:
+            data = json.load(f)
+        return datetime.fromisoformat(data["last_run"])
+    except (json.JSONDecodeError, KeyError, ValueError):
+        print("Warning: state file is corrupt, defaulting to last 24 hours.", file=sys.stderr)
+        return datetime.now(timezone.utc) - timedelta(days=1)
 
 
 def save_last_run(dt):
@@ -90,7 +95,11 @@ def jira_get(path, params=None):
 
 def fetch_my_account_id():
     data = jira_get("/rest/api/3/myself")
-    return data["accountId"]
+    account_id = data.get("accountId")
+    if not account_id:
+        print("Error: could not determine your Jira account ID.", file=sys.stderr)
+        sys.exit(1)
+    return account_id
 
 
 def fetch_updated_issues(since):
@@ -239,7 +248,7 @@ def extract_relevant_activity(issue, since, account_id):
     # COMMENTS
     # ---------------------------------------------------------
 
-    comments = issue["fields"]["comment"]["comments"]
+    comments = issue["fields"].get("comment", {}).get("comments", [])
 
     current_assignee = issue["fields"]["assignee"]
 
@@ -364,7 +373,7 @@ def parse_since_arg(value):
     value = value.strip()
 
     # Relative: 1d / 2h / 30m (case-insensitive)
-    m = re.fullmatch(r'(\d+)(d|h|m)', value, re.IGNORECASE)
+    m = _RELATIVE_RE.fullmatch(value)
     if m:
         n, unit = int(m.group(1)), m.group(2).lower()
         if n == 0:
