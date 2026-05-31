@@ -22,6 +22,32 @@ jobs:
         working-directory: go
         run: go test ./... -v
 
+  lint-go:
+    name: Go lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: go
+
+  lint-python:
+    name: Python lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruff
+        run: pip install ruff
+      - name: Run ruff
+        working-directory: python
+        run: ruff check .
+
   test-python:
     name: Python ${{ matrix.python-version }} tests
     runs-on: ubuntu-latest
