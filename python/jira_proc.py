@@ -86,9 +86,9 @@ def jira_get(path, params=None):
     )
 
     if not response.ok:
-        print("STATUS:", response.status_code)
-        print("RESPONSE:")
-        print(response.text)
+        print("STATUS:", response.status_code, file=sys.stderr)
+        print("RESPONSE:", file=sys.stderr)
+        print(response.text, file=sys.stderr)
         response.raise_for_status()
 
     return response.json()
