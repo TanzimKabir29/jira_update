@@ -448,6 +448,11 @@ def main():
         metavar='N',
         help='Show run history. Optionally specify number of entries (default 20, 0 = all)',
     )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Run normally but do not update state or history',
+    )
     args = parser.parse_args()
 
     if args.log is not None:
@@ -517,6 +522,8 @@ def main():
             "State not updated to avoid missing activity on next run.",
             file=sys.stderr,
         )
+    elif args.dry_run:
+        print("[dry-run] state and history not updated", file=sys.stderr)
     else:
         now = datetime.now(timezone.utc)
         save_last_run(now)

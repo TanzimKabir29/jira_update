@@ -535,6 +535,7 @@ func main() {
 	sinceFlag := flag.String("since", "", `Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"`)
 	showLog := flag.Bool("log", false, "Show run history (last 20 entries)")
 	logN := flag.Int("log-n", -1, "Show last N entries of run history (0 = all)")
+	dryRun := flag.Bool("dry-run", false, "Run normally but do not update state or history")
 	flag.Parse()
 
 	if *showLog || *logN >= 0 {
@@ -628,6 +629,8 @@ func main() {
 
 	if hasError {
 		fmt.Fprintln(os.Stderr, "Warning: some issues could not be processed. State not updated to avoid missing activity on next run.")
+	} else if *dryRun {
+		fmt.Fprintln(os.Stderr, "[dry-run] state and history not updated")
 	} else {
 		saveLastRun(time.Now().UTC())
 		appendHistory("go", sinceType, sinceValue)
