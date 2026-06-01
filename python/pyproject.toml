@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "jira-update"
@@ -10,6 +10,9 @@ dependencies = [
     "requests>=2.28.0",
     "python-dotenv>=1.0.0",
 ]
+
+[tool.setuptools]
+py-modules = ["jira_proc"]
 
 [project.scripts]
 jira-update = "jira_proc:main"
