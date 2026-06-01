@@ -7,21 +7,6 @@ on:
   workflow_call:
 
 jobs:
-  test-go:
-    name: Go tests (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-      - name: Run tests
-        working-directory: go
-        run: go test ./... -v
-
   lint-go:
     name: Go lint
     runs-on: ubuntu-latest
@@ -33,6 +18,49 @@ jobs:
       - uses: golangci/golangci-lint-action@v6
         with:
           working-directory: go
+
+  test-go:
+    name: Go unit tests (${{ matrix.os }})
+    needs: lint-go
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: Run unit tests
+        working-directory: go
+        run: go test ./... -v
+
+  smoke-test-go:
+    name: Go binary smoke test (${{ matrix.os }})
+    needs: test-go
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: Build binary
+        working-directory: go
+        shell: bash
+        run: |
+          EXT=""
+          if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
+          go build -o jira-update${EXT} .
+      - name: Verify binary runs
+        working-directory: go
+        shell: bash
+        run: |
+          EXT=""
+          if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
+          ./jira-update${EXT} --version
 
   lint-python:
     name: Python lint
@@ -49,7 +77,8 @@ jobs:
         run: ruff check .
 
   test-python:
-    name: Python ${{ matrix.python-version }} tests
+    name: Python ${{ matrix.python-version }} unit tests
+    needs: lint-python
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -62,6 +91,25 @@ jobs:
       - name: Install dependencies
         working-directory: python
         run: pip install -r requirements.txt
-      - name: Run tests
+      - name: Run unit tests
         working-directory: python
         run: python -m unittest test_parse_since_arg -v
+
+  install-test-python:
+    name: Python ${{ matrix.python-version }} install test
+    needs: test-python
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pipx
+        run: pip install pipx
+      - name: Install package via pipx
+        run: pipx install ./python
+      - name: Verify install
+        run: ~/.local/bin/jira-update --version
