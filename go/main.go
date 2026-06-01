@@ -433,11 +433,22 @@ func printHistory(limit int) {
 // =========================================================
 
 func parseJiraTime(s string) (time.Time, error) {
-	return time.Parse(time.RFC3339, strings.Replace(s, "Z", "+00:00", 1))
+	// Jira omits the colon in timezone offsets (e.g. +0200 instead of +02:00).
+	// Insert it so the string is valid RFC3339.
+	if n := len(s); n >= 5 {
+		if c := s[n-5]; c == '+' || c == '-' {
+			s = s[:n-2] + ":" + s[n-2:]
+		}
+	}
+	s = strings.Replace(s, "Z", "+00:00", 1)
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }
 
 func fmtTime(t time.Time) string {
-	return t.UTC().Format("2006-01-02 15:04")
+	return t.Format("2006-01-02 15:04")
 }
 
 // =========================================================
@@ -452,12 +463,60 @@ type Event struct {
 func extractRelevantActivity(issue Issue, since time.Time, accountID string) ([]Event, error) {
 	var events []Event
 
-	assignedToMe := issue.Fields.Assignee != nil &&
-		issue.Fields.Assignee.AccountID == accountID
-
 	histories, err := fetchChangelog(issue.Key)
 	if err != nil {
 		return nil, err
+	}
+
+	// Sort histories chronologically to build an accurate assignee timeline.
+	sort.Slice(histories, func(i, j int) bool {
+		ti, _ := parseJiraTime(histories[i].Created)
+		tj, _ := parseJiraTime(histories[j].Created)
+		return ti.Before(tj)
+	})
+
+	// Build assignee timeline: list of (changeTime, newAccountID) pairs.
+	type assigneeChange struct {
+		at      time.Time
+		toID    string
+	}
+	var timeline []assigneeChange
+	initialAssignee := ""
+	foundFirstChange := false
+
+	for _, h := range histories {
+		for _, item := range h.Items {
+			if item.Field == "assignee" {
+				if !foundFirstChange {
+					initialAssignee = item.From
+					foundFirstChange = true
+				}
+				t, err := parseJiraTime(h.Created)
+				if err != nil {
+					continue
+				}
+				timeline = append(timeline, assigneeChange{at: t, toID: item.To})
+			}
+		}
+	}
+
+	if !foundFirstChange {
+		if issue.Fields.Assignee != nil {
+			initialAssignee = issue.Fields.Assignee.AccountID
+		}
+	}
+
+	// wasAssignedAt returns true if accountID was the assignee at time t.
+	wasAssignedAt := func(t time.Time) bool {
+		current := initialAssignee
+		for _, change := range timeline {
+			if !change.at.After(t) {
+				current = change.toID
+			} else {
+				break
+			}
+		}
+		return current == accountID
 	}
 
 	for _, h := range histories {
@@ -488,7 +547,7 @@ func extractRelevantActivity(issue Issue, since time.Time, accountID string) ([]
 				}
 
 			case "status":
-				if assignedToMe {
+				if wasAssignedAt(created) {
 					events = append(events, Event{
 						Time: created,
 						Text: fmt.Sprintf("[%s] %s changed status from '%s' to '%s'",
@@ -500,12 +559,12 @@ func extractRelevantActivity(issue Issue, since time.Time, accountID string) ([]
 	}
 
 	// Comments
-	if assignedToMe {
-		for _, c := range issue.Fields.Comment.Comments {
-			created, err := parseJiraTime(c.Created)
-			if err != nil || created.Before(since) {
-				continue
-			}
+	for _, c := range issue.Fields.Comment.Comments {
+		created, err := parseJiraTime(c.Created)
+		if err != nil || created.Before(since) {
+			continue
+		}
+		if wasAssignedAt(created) {
 			events = append(events, Event{
 				Time: created,
 				Text: fmt.Sprintf("[%s] %s commented", fmtTime(created), c.Author.DisplayName),
@@ -687,10 +746,12 @@ func main() {
 		sinceType, sinceValue = "state", since.Format(time.RFC3339)
 	}
 
-	fmt.Println(strings.Repeat("=", 80))
-	fmt.Printf("JIRA activity since %s\n", since.Format(time.RFC3339))
-	fmt.Println(strings.Repeat("=", 80))
-	fmt.Println()
+	if *output != "json" {
+		fmt.Println(strings.Repeat("=", 80))
+		fmt.Printf("JIRA activity since %s\n", since.Format(time.RFC3339))
+		fmt.Println(strings.Repeat("=", 80))
+		fmt.Println()
+	}
 
 	var projects []string
 	if *projectFlag != "" {

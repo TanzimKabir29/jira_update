@@ -183,46 +183,70 @@ def fetch_issue_changelog(issue_key):
 def extract_relevant_activity(issue, since, account_id):
     """
     Extract only activity relevant to the current user.
+    Shows events where the user was the assignee at the time of the event.
     """
 
     issue_key = issue["key"]
     summary = issue["fields"]["summary"]
 
-    relevant_events = []
-
     histories = fetch_issue_changelog(issue["key"])
 
-    for history in histories:
-        created = parse_jira_time(history["created"])
+    # Sort all changelog entries chronologically
+    sorted_histories = sorted(histories, key=lambda h: parse_jira_time(h["created"]))
 
-        items = history.get("items", [])
+    # Build assignee timeline: list of (time, account_id_or_none)
+    # Infer initial assignee from the 'from' field of the first assignee change.
+    # If no changes exist, the current assignee has always been the assignee.
+    assignee_timeline = []
+    initial_assignee = None
+    found_first_change = False
+
+    for h in sorted_histories:
+        for item in h.get("items", []):
+            if item["field"] == "assignee":
+                if not found_first_change:
+                    initial_assignee = item.get("from")
+                    found_first_change = True
+                assignee_timeline.append((parse_jira_time(h["created"]), item.get("to")))
+
+    if not found_first_change:
+        current = issue["fields"]["assignee"]
+        initial_assignee = current["accountId"] if current else None
+
+    def was_assigned_at(t):
+        current = initial_assignee
+        for change_time, to_id in assignee_timeline:
+            if change_time <= t:
+                current = to_id
+            else:
+                break
+        return current == account_id
+
+    # ---------------------------------------------------------
+    # CHANGELOG EVENTS
+    # ---------------------------------------------------------
+
+    relevant_events = []
+
+    for history in sorted_histories:
+        created = parse_jira_time(history["created"])
 
         if created < since:
             continue
 
         author = history["author"]["displayName"]
 
-        for item in items:
+        for item in history.get("items", []):
 
             field = item["field"]
 
-            # -------------------------------------------------
-            # ASSIGNEE CHANGES
-            # -------------------------------------------------
-
             if field == "assignee":
-
                 from_account = item.get("from")
                 to_account = item.get("to")
 
-                if (
-                    from_account == account_id
-                    or to_account == account_id
-                ):
-
+                if from_account == account_id or to_account == account_id:
                     from_name = item.get("fromString") or "Unassigned"
                     to_name = item.get("toString") or "Unassigned"
-
                     relevant_events.append({
                         "time": created,
                         "text": (
@@ -232,32 +256,14 @@ def extract_relevant_activity(issue, since, account_id):
                         )
                     })
 
-            # -------------------------------------------------
-            # STATUS CHANGES
-            # Only include if currently assigned to you
-            # OR was assigned to you during change
-            # -------------------------------------------------
-
             elif field == "status":
-
-                current_assignee = issue["fields"]["assignee"]
-
-                assigned_to_me = (
-                    current_assignee
-                    and current_assignee["accountId"] == account_id
-                )
-
-                if assigned_to_me:
-
-                    from_status = item.get("fromString")
-                    to_status = item.get("toString")
-
+                if was_assigned_at(created):
                     relevant_events.append({
                         "time": created,
                         "text": (
                             f"[{format_time(created)}] "
                             f"{author} changed status "
-                            f"from '{from_status}' to '{to_status}'"
+                            f"from '{item.get('fromString')}' to '{item.get('toString')}'"
                         )
                     })
 
@@ -265,37 +271,18 @@ def extract_relevant_activity(issue, since, account_id):
     # COMMENTS
     # ---------------------------------------------------------
 
-    comments = issue["fields"].get("comment", {}).get("comments", [])
-
-    current_assignee = issue["fields"]["assignee"]
-
-    assigned_to_me = (
-        current_assignee
-        and current_assignee["accountId"] == account_id
-    )
-
-    if assigned_to_me:
-
-        for comment in comments:
-
-            created = parse_jira_time(comment["created"])
-
-            if created < since:
-                continue
-
-            author = comment["author"]["displayName"]
-
+    for comment in issue["fields"].get("comment", {}).get("comments", []):
+        created = parse_jira_time(comment["created"])
+        if created < since:
+            continue
+        if was_assigned_at(created):
             relevant_events.append({
                 "time": created,
                 "text": (
                     f"[{format_time(created)}] "
-                    f"{author} commented"
+                    f"{comment['author']['displayName']} commented"
                 )
             })
-
-    # ---------------------------------------------------------
-    # SORT EVENTS
-    # ---------------------------------------------------------
 
     relevant_events.sort(key=lambda x: x["time"])
 
