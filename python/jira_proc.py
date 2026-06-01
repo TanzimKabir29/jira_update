@@ -107,11 +107,14 @@ def fetch_my_account_id():
     return account_id
 
 
-def fetch_updated_issues(since, projects=None):
+def fetch_updated_issues(since, projects=None, unassigned_qa=False):
 
     since_str = since.strftime("%Y-%m-%d %H:%M")
 
-    jql = f'assignee was currentUser() AND updated >= "{since_str}"'
+    if unassigned_qa:
+        jql = f'status changed by currentUser() after "{since_str}"'
+    else:
+        jql = f'assignee was currentUser() AND updated >= "{since_str}"'
     if projects:
         keys = ", ".join(projects)
         jql += f" AND project in ({keys})"
@@ -180,16 +183,41 @@ def fetch_issue_changelog(issue_key):
 # ACTIVITY EXTRACTION
 # =========================================================
 
-def extract_relevant_activity(issue, since, account_id):
+def extract_relevant_activity(issue, since, account_id, unassigned_qa=False):
     """
     Extract only activity relevant to the current user.
     Shows events where the user was the assignee at the time of the event.
+    When unassigned_qa is True, shows only status changes made by the user
+    from a QA column (any status containing 'qa') to another status.
     """
 
     issue_key = issue["key"]
     summary = issue["fields"]["summary"]
 
     histories = fetch_issue_changelog(issue["key"])
+
+    if unassigned_qa:
+        sorted_histories = sorted(histories, key=lambda h: parse_jira_time(h["created"]))
+        relevant_events = []
+        for history in sorted_histories:
+            created = parse_jira_time(history["created"])
+            if created < since:
+                continue
+            if history["author"].get("accountId") != account_id:
+                continue
+            for item in history.get("items", []):
+                if item["field"] == "status" and "qa" in item.get("fromString", "").lower():
+                    relevant_events.append({
+                        "time": created,
+                        "text": (
+                            f"[{format_time(created)}] "
+                            f"{history['author']['displayName']} changed status "
+                            f"from '{item.get('fromString')}' to '{item.get('toString')}'"
+                        )
+                    })
+        relevant_events.sort(key=lambda x: x["time"])
+        return {"key": issue_key, "summary": summary, "events": relevant_events}
+
 
     # Sort all changelog entries chronologically
     sorted_histories = sorted(histories, key=lambda h: parse_jira_time(h["created"]))
@@ -483,6 +511,11 @@ def main():
         help='Comma-separated project keys to filter results (e.g. PROJ or PROJ,OTHER)',
     )
     parser.add_argument(
+        '--unassigned-qa',
+        action='store_true',
+        help='Show tickets where you moved a status from a QA column to another',
+    )
+    parser.add_argument(
         '--log',
         nargs='?',
         const=20,
@@ -558,14 +591,14 @@ def main():
         print()
 
     projects = [k.strip().upper() for k in args.project.split(",")] if args.project else None
-    issues = fetch_updated_issues(since, projects=projects)
+    issues = fetch_updated_issues(since, projects=projects, unassigned_qa=args.unassigned_qa)
 
     issue_activity = []
     has_error = False
 
     for issue in issues:
         try:
-            activity = extract_relevant_activity(issue, since, account_id)
+            activity = extract_relevant_activity(issue, since, account_id, unassigned_qa=args.unassigned_qa)
         except Exception as e:
             print(f"Warning: skipping {issue['key']}: {e}", file=sys.stderr)
             has_error = True

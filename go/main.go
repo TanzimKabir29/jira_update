@@ -248,8 +248,13 @@ type Issue struct {
 	} `json:"fields"`
 }
 
-func fetchUpdatedIssues(since time.Time, projects []string) ([]Issue, error) {
-	jql := fmt.Sprintf(`assignee was currentUser() AND updated >= "%s"`, since.Format("2006-01-02 15:04"))
+func fetchUpdatedIssues(since time.Time, projects []string, unassignedQA bool) ([]Issue, error) {
+	var jql string
+	if unassignedQA {
+		jql = fmt.Sprintf(`status changed by currentUser() after "%s"`, since.Format("2006-01-02 15:04"))
+	} else {
+		jql = fmt.Sprintf(`assignee was currentUser() AND updated >= "%s"`, since.Format("2006-01-02 15:04"))
+	}
 	if len(projects) > 0 {
 		jql += fmt.Sprintf(` AND project in (%s)`, strings.Join(projects, ", "))
 	}
@@ -301,6 +306,7 @@ type ChangelogItem struct {
 type ChangelogHistory struct {
 	Created string `json:"created"`
 	Author  struct {
+		AccountID   string `json:"accountId"`
 		DisplayName string `json:"displayName"`
 	} `json:"author"`
 	Items []ChangelogItem `json:"items"`
@@ -460,12 +466,37 @@ type Event struct {
 	Text string
 }
 
-func extractRelevantActivity(issue Issue, since time.Time, accountID string) ([]Event, error) {
+func extractRelevantActivity(issue Issue, since time.Time, accountID string, unassignedQA bool) ([]Event, error) {
 	var events []Event
 
 	histories, err := fetchChangelog(issue.Key)
 	if err != nil {
 		return nil, err
+	}
+
+	if unassignedQA {
+		for _, h := range histories {
+			created, err := parseJiraTime(h.Created)
+			if err != nil || created.Before(since) {
+				continue
+			}
+			if h.Author.AccountID != accountID {
+				continue
+			}
+			for _, item := range h.Items {
+				if item.Field == "status" && strings.Contains(strings.ToLower(item.FromString), "qa") {
+					events = append(events, Event{
+						Time: created,
+						Text: fmt.Sprintf("[%s] %s changed status from '%s' to '%s'",
+							fmtTime(created), h.Author.DisplayName, item.FromString, item.ToString),
+					})
+				}
+			}
+		}
+		sort.Slice(events, func(i, j int) bool {
+			return events[i].Time.Before(events[j].Time)
+		})
+		return events, nil
 	}
 
 	// Sort histories chronologically to build an accurate assignee timeline.
@@ -676,6 +707,7 @@ func parseSinceArg(value string) (time.Time, error) {
 func main() {
 	sinceFlag := flag.String("since", "", `Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"`)
 	projectFlag := flag.String("project", "", "Comma-separated project keys to filter results (e.g. PROJ or PROJ,OTHER)")
+	unassignedQA := flag.Bool("unassigned-qa", false, "Show tickets where you moved a status from a QA column to another")
 	showLog := flag.Bool("log", false, "Show run history (last 20 entries)")
 	logN := flag.Int("log-n", -1, "Show last N entries of run history (0 = all)")
 	dryRun := flag.Bool("dry-run", false, "Run normally but do not update state or history")
@@ -762,7 +794,7 @@ func main() {
 		}
 	}
 
-	issues, err := fetchUpdatedIssues(since, projects)
+	issues, err := fetchUpdatedIssues(since, projects, *unassignedQA)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error fetching issues:", err)
 		os.Exit(1)
@@ -780,7 +812,7 @@ func main() {
 		wg.Add(1)
 		go func(i int, issue Issue) {
 			defer wg.Done()
-			events, err := extractRelevantActivity(issue, since, accountID)
+			events, err := extractRelevantActivity(issue, since, accountID, *unassignedQA)
 			results[i] = result{issue: issue, events: events, err: err}
 		}(i, issue)
 	}

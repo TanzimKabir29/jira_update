@@ -75,6 +75,8 @@ Flags:
                      "2026-05-30 14:00"
                      "2026-05-30 14:00+06:00"
   --project KEYS   Filter to specific projects, e.g. PROJ or PROJ,OTHER
+  --unassigned-qa  Show only tickets where you moved a status from a QA
+                   column (any status containing "qa") to another status
   --output FORMAT  Output format: json
   --log [N]        Show run history (default 20 entries)
   --log-n N        Show last N entries of run history (0 = all)
