@@ -371,7 +371,7 @@ func appendHistory(source, sinceType, sinceValue string) {
 		return
 	}
 	defer f.Close()
-	f.Write(append(data, '\n'))
+	_, _ = f.Write(append(data, '\n'))
 }
 
 func printHistory(limit int) {
