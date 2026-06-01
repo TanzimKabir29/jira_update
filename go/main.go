@@ -46,7 +46,7 @@ func loadEnv() {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -58,7 +58,7 @@ func loadEnv() {
 		if len(parts) != 2 {
 			continue
 		}
-		os.Setenv(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		_ = os.Setenv(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 	}
 }
 
@@ -199,7 +199,7 @@ func jiraGet(path string, params url.Values) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -370,7 +370,7 @@ func appendHistory(source, sinceType, sinceValue string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, _ = f.Write(append(data, '\n'))
 }
 
@@ -618,7 +618,7 @@ func parseSinceArg(value string) (time.Time, error) {
 	if m := relativeRe.FindStringSubmatch(value); m != nil {
 		n, _ := strconv.Atoi(m[1])
 		if n == 0 {
-			return time.Time{}, fmt.Errorf("'%s' is not a valid duration. Use a value greater than 0.", value)
+			return time.Time{}, fmt.Errorf("'%s' is not a valid duration. Use a value greater than 0", value)
 		}
 		switch strings.ToLower(m[2]) {
 		case "d":
