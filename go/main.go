@@ -708,6 +708,7 @@ func main() {
 	sinceFlag := flag.String("since", "", `Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"`)
 	projectFlag := flag.String("project", "", "Comma-separated project keys to filter results (e.g. PROJ or PROJ,OTHER)")
 	unassignedQA := flag.Bool("unassigned-qa", false, "Show tickets where you moved a status from a QA column to another")
+	_ = flag.Bool("assigned-qa", false, "Reserved for future use")
 	showLog := flag.Bool("log", false, "Show run history (last 20 entries)")
 	logN := flag.Int("log-n", -1, "Show last N entries of run history (0 = all)")
 	dryRun := flag.Bool("dry-run", false, "Run normally but do not update state or history")

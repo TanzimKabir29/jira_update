@@ -516,6 +516,11 @@ def main():
         help='Show tickets where you moved a status from a QA column to another',
     )
     parser.add_argument(
+        '--assigned-qa',
+        action='store_true',
+        help='Reserved for future use',
+    )
+    parser.add_argument(
         '--log',
         nargs='?',
         const=20,
