@@ -119,6 +119,24 @@ The timestamp of each run is saved to `~/.jira_update/state.json`. On first run 
 
 ## Shell completions
 
+First, clone or download the repo to get the completion files, then follow the steps for your shell.
+
+### zsh (macOS default)
+
+```bash
+mkdir -p ~/.zsh/completions
+cp completions/jira-update.zsh ~/.zsh/completions/_jira-update
+```
+
+Add to `~/.zshrc` if not already present:
+
+```zsh
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
+```
+
+Then reload: `exec zsh`
+
 ### bash
 
 Add to `~/.bashrc`:
@@ -127,11 +145,7 @@ Add to `~/.bashrc`:
 source /path/to/completions/jira-update.bash
 ```
 
-### zsh
-
-```bash
-cp completions/jira-update.zsh /usr/local/share/zsh/site-functions/_jira-update
-```
+Then reload: `source ~/.bashrc`
 
 ### PowerShell
 
