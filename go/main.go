@@ -36,6 +36,18 @@ var (
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
+// =========================================================
+// RUN MODE
+// =========================================================
+
+type runMode int
+
+const (
+	modeNormal       runMode = iota
+	modeUnassignedQA runMode = iota
+	modePM           runMode = iota
+)
+
 func loadEnv() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -248,11 +260,14 @@ type Issue struct {
 	} `json:"fields"`
 }
 
-func fetchUpdatedIssues(since time.Time, projects []string, unassignedQA bool) ([]Issue, error) {
+func fetchUpdatedIssues(since time.Time, projects []string, mode runMode) ([]Issue, error) {
 	var jql string
-	if unassignedQA {
+	switch mode {
+	case modeUnassignedQA:
 		jql = fmt.Sprintf(`status changed by currentUser() after "%s"`, since.Format("2006-01-02 15:04"))
-	} else {
+	case modePM:
+		jql = fmt.Sprintf(`updated >= "%s"`, since.Format("2006-01-02 15:04"))
+	default:
 		jql = fmt.Sprintf(`assignee was currentUser() AND updated >= "%s"`, since.Format("2006-01-02 15:04"))
 	}
 	if len(projects) > 0 {
@@ -466,7 +481,10 @@ type Event struct {
 	Text string
 }
 
-func extractRelevantActivity(issue Issue, since time.Time, accountID string, unassignedQA bool) ([]Event, error) {
+// issueExtractor is the common signature for per-issue activity extractors.
+type issueExtractor func(issue Issue, since time.Time, accountID string) ([]Event, error)
+
+func extractNormalActivity(issue Issue, since time.Time, accountID string) ([]Event, error) {
 	var events []Event
 
 	histories, err := fetchChangelog(issue.Key)
@@ -474,42 +492,16 @@ func extractRelevantActivity(issue Issue, since time.Time, accountID string, una
 		return nil, err
 	}
 
-	if unassignedQA {
-		for _, h := range histories {
-			created, err := parseJiraTime(h.Created)
-			if err != nil || created.Before(since) {
-				continue
-			}
-			if h.Author.AccountID != accountID {
-				continue
-			}
-			for _, item := range h.Items {
-				if item.Field == "status" && strings.Contains(strings.ToLower(item.FromString), "qa") {
-					events = append(events, Event{
-						Time: created,
-						Text: fmt.Sprintf("[%s] %s changed status from '%s' to '%s'",
-							fmtTime(created), h.Author.DisplayName, item.FromString, item.ToString),
-					})
-				}
-			}
-		}
-		sort.Slice(events, func(i, j int) bool {
-			return events[i].Time.Before(events[j].Time)
-		})
-		return events, nil
-	}
-
-	// Sort histories chronologically to build an accurate assignee timeline.
+	// Sort chronologically to build an accurate assignee timeline.
 	sort.Slice(histories, func(i, j int) bool {
 		ti, _ := parseJiraTime(histories[i].Created)
 		tj, _ := parseJiraTime(histories[j].Created)
 		return ti.Before(tj)
 	})
 
-	// Build assignee timeline: list of (changeTime, newAccountID) pairs.
 	type assigneeChange struct {
-		at      time.Time
-		toID    string
+		at   time.Time
+		toID string
 	}
 	var timeline []assigneeChange
 	initialAssignee := ""
@@ -537,7 +529,6 @@ func extractRelevantActivity(issue Issue, since time.Time, accountID string, una
 		}
 	}
 
-	// wasAssignedAt returns true if accountID was the assignee at time t.
 	wasAssignedAt := func(t time.Time) bool {
 		current := initialAssignee
 		for _, change := range timeline {
@@ -559,7 +550,6 @@ func extractRelevantActivity(issue Issue, since time.Time, accountID string, una
 
 		for _, item := range h.Items {
 			switch item.Field {
-
 			case "assignee":
 				if item.From == accountID || item.To == accountID {
 					from := item.FromString
@@ -576,7 +566,6 @@ func extractRelevantActivity(issue Issue, since time.Time, accountID string, una
 							fmtTime(created), author, from, to),
 					})
 				}
-
 			case "status":
 				if wasAssignedAt(created) {
 					events = append(events, Event{
@@ -589,7 +578,6 @@ func extractRelevantActivity(issue Issue, since time.Time, accountID string, una
 		}
 	}
 
-	// Comments
 	for _, c := range issue.Fields.Comment.Comments {
 		created, err := parseJiraTime(c.Created)
 		if err != nil || created.Before(since) {
@@ -607,6 +595,258 @@ func extractRelevantActivity(issue Issue, since time.Time, accountID string, una
 		return events[i].Time.Before(events[j].Time)
 	})
 	return events, nil
+}
+
+func extractUnassignedQAActivity(issue Issue, since time.Time, accountID string) ([]Event, error) {
+	var events []Event
+
+	histories, err := fetchChangelog(issue.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, h := range histories {
+		created, err := parseJiraTime(h.Created)
+		if err != nil || created.Before(since) {
+			continue
+		}
+		if h.Author.AccountID != accountID {
+			continue
+		}
+		for _, item := range h.Items {
+			if item.Field == "status" && strings.Contains(strings.ToLower(item.FromString), "qa") {
+				events = append(events, Event{
+					Time: created,
+					Text: fmt.Sprintf("[%s] %s changed status from '%s' to '%s'",
+						fmtTime(created), h.Author.DisplayName, item.FromString, item.ToString),
+				})
+			}
+		}
+	}
+
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].Time.Before(events[j].Time)
+	})
+	return events, nil
+}
+
+// =========================================================
+// PM MODE
+// =========================================================
+
+var terminalStatuses = []string{"done", "released", "closed", "cancelled", "canceled"}
+
+func isTerminalStatus(s string) bool {
+	lower := strings.ToLower(s)
+	for _, t := range terminalStatuses {
+		if lower == t {
+			return true
+		}
+	}
+	return false
+}
+
+type pmTransition struct {
+	From string
+	To   string
+}
+
+type pmIssueRef struct {
+	Key     string `json:"key"`
+	Summary string `json:"summary"`
+}
+
+type pmSummary struct {
+	Transitions        map[pmTransition]int
+	UniqueTicketsMoved map[string]struct{}
+	CompletedTickets   []pmIssueRef
+	TeamActivity       map[string]int
+}
+
+func collectPMData(issues []Issue, since time.Time) (pmSummary, error) {
+	type result struct {
+		transitions      map[pmTransition]int
+		hadStatusChange  bool
+		completedTickets []pmIssueRef
+		teamActivity     map[string]int
+		err              error
+		issueKey         string
+		issueSummary     string
+	}
+
+	results := make([]result, len(issues))
+	var wg sync.WaitGroup
+
+	for i, issue := range issues {
+		wg.Add(1)
+		go func(i int, issue Issue) {
+			defer wg.Done()
+			r := result{
+				transitions:  make(map[pmTransition]int),
+				teamActivity: make(map[string]int),
+				issueKey:     issue.Key,
+				issueSummary: issue.Fields.Summary,
+			}
+
+			histories, err := fetchChangelog(issue.Key)
+			if err != nil {
+				r.err = err
+				results[i] = r
+				return
+			}
+
+			completedSeen := false
+			for _, h := range histories {
+				created, err := parseJiraTime(h.Created)
+				if err != nil || created.Before(since) {
+					continue
+				}
+				for _, item := range h.Items {
+					if item.Field != "status" {
+						continue
+					}
+					r.hadStatusChange = true
+					r.transitions[pmTransition{From: item.FromString, To: item.ToString}]++
+					r.teamActivity[h.Author.DisplayName]++
+					if !completedSeen && isTerminalStatus(item.ToString) {
+						r.completedTickets = append(r.completedTickets, pmIssueRef{
+							Key:     issue.Key,
+							Summary: issue.Fields.Summary,
+						})
+						completedSeen = true
+					}
+				}
+			}
+			results[i] = r
+		}(i, issue)
+	}
+	wg.Wait()
+
+	summary := pmSummary{
+		Transitions:        make(map[pmTransition]int),
+		UniqueTicketsMoved: make(map[string]struct{}),
+		TeamActivity:       make(map[string]int),
+	}
+
+	var hasError bool
+	for _, r := range results {
+		if r.err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", r.issueKey, r.err)
+			hasError = true
+			continue
+		}
+		if r.hadStatusChange {
+			summary.UniqueTicketsMoved[r.issueKey] = struct{}{}
+		}
+		for k, v := range r.transitions {
+			summary.Transitions[k] += v
+		}
+		summary.CompletedTickets = append(summary.CompletedTickets, r.completedTickets...)
+		for k, v := range r.teamActivity {
+			summary.TeamActivity[k] += v
+		}
+	}
+
+	if hasError {
+		fmt.Fprintln(os.Stderr, "Warning: some issues could not be processed.")
+	}
+	return summary, nil
+}
+
+func printPMSummary(s pmSummary, output string) {
+	type transitionOut struct {
+		From  string `json:"from"`
+		To    string `json:"to"`
+		Count int    `json:"count"`
+	}
+	type teamMemberOut struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+	type jsonOut struct {
+		Transitions        []transitionOut `json:"transitions"`
+		UniqueTicketsMoved int             `json:"unique_tickets_moved"`
+		CompletedTickets   []pmIssueRef    `json:"completed_tickets"`
+		TeamActivity       []teamMemberOut `json:"team_activity"`
+	}
+
+	// Build sorted slices for deterministic output.
+	transitions := make([]transitionOut, 0, len(s.Transitions))
+	for k, v := range s.Transitions {
+		transitions = append(transitions, transitionOut{From: k.From, To: k.To, Count: v})
+	}
+	sort.Slice(transitions, func(i, j int) bool {
+		if transitions[i].From != transitions[j].From {
+			return transitions[i].From < transitions[j].From
+		}
+		return transitions[i].To < transitions[j].To
+	})
+
+	team := make([]teamMemberOut, 0, len(s.TeamActivity))
+	for name, count := range s.TeamActivity {
+		team = append(team, teamMemberOut{Name: name, Count: count})
+	}
+	sort.Slice(team, func(i, j int) bool {
+		if team[i].Count != team[j].Count {
+			return team[i].Count > team[j].Count
+		}
+		return team[i].Name < team[j].Name
+	})
+
+	sort.Slice(s.CompletedTickets, func(i, j int) bool {
+		return s.CompletedTickets[i].Key < s.CompletedTickets[j].Key
+	})
+
+	if output == "json" {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(jsonOut{
+			Transitions:        transitions,
+			UniqueTicketsMoved: len(s.UniqueTicketsMoved),
+			CompletedTickets:   s.CompletedTickets,
+			TeamActivity:       team,
+		})
+		return
+	}
+
+	fmt.Println("Status Transitions")
+	fmt.Println(strings.Repeat("-", 80))
+	if len(transitions) == 0 {
+		fmt.Println("  No status changes found.")
+	} else {
+		maxLen := 0
+		for _, t := range transitions {
+			if n := len(t.From) + len(t.To) + 6; n > maxLen { // 6 = "  " + " → "
+				maxLen = n
+			}
+		}
+		for _, t := range transitions {
+			label := fmt.Sprintf("  %s → %s", t.From, t.To)
+			fmt.Printf("%-*s    %d\n", maxLen, label, t.Count)
+		}
+	}
+	fmt.Println()
+
+	fmt.Printf("Unique tickets moved: %d\n", len(s.UniqueTicketsMoved))
+	fmt.Println()
+
+	fmt.Printf("Completed this period: %d\n", len(s.CompletedTickets))
+	for _, iss := range s.CompletedTickets {
+		fmt.Printf("  %s - %s\n", iss.Key, iss.Summary)
+	}
+	fmt.Println()
+
+	fmt.Println("Team activity")
+	fmt.Println(strings.Repeat("-", 80))
+	maxLen := 0
+	for _, m := range team {
+		if len(m.Name) > maxLen {
+			maxLen = len(m.Name)
+		}
+	}
+	for _, m := range team {
+		fmt.Printf("  %-*s    %d\n", maxLen, m.Name, m.Count)
+	}
 }
 
 // =========================================================
@@ -707,8 +947,9 @@ func parseSinceArg(value string) (time.Time, error) {
 func main() {
 	sinceFlag := flag.String("since", "", `Override start time. Accepted: 9am, 14:30, 2h, 1d, "2026-05-30 14:00", "2026-05-30 14:00+06:00"`)
 	projectFlag := flag.String("project", "", "Comma-separated project keys to filter results (e.g. PROJ or PROJ,OTHER)")
-	unassignedQA := flag.Bool("unassigned-qa", false, "Show tickets where you moved a status from a QA column to another")
-	_ = flag.Bool("assigned-qa", false, "Reserved for future use")
+	unassignedQAFlag := flag.Bool("unassigned-qa", false, "Show tickets where you moved a status from a QA column to another")
+	assignedQAFlag := flag.Bool("assigned-qa", false, "Reserved for future use")
+	pmFlag := flag.Bool("pm", false, "Show a project-wide summary of ticket movements")
 	showLog := flag.Bool("log", false, "Show run history (last 20 entries)")
 	logN := flag.Int("log-n", -1, "Show last N entries of run history (0 = all)")
 	dryRun := flag.Bool("dry-run", false, "Run normally but do not update state or history")
@@ -779,6 +1020,34 @@ func main() {
 		sinceType, sinceValue = "state", since.Format(time.RFC3339)
 	}
 
+	// Determine run mode — flags are mutually exclusive.
+	modeFlags := 0
+	if *unassignedQAFlag {
+		modeFlags++
+	}
+	if *assignedQAFlag {
+		modeFlags++
+	}
+	if *pmFlag {
+		modeFlags++
+	}
+	if modeFlags > 1 {
+		fmt.Fprintln(os.Stderr, "Error: --pm, --unassigned-qa, and --assigned-qa are mutually exclusive.")
+		os.Exit(1)
+	}
+
+	mode := modeNormal
+	if *unassignedQAFlag {
+		mode = modeUnassignedQA
+	}
+	if *pmFlag {
+		mode = modePM
+		if *projectFlag == "" {
+			fmt.Fprintln(os.Stderr, "Error: --pm requires --project to limit scope.")
+			os.Exit(1)
+		}
+	}
+
 	if *output != "json" {
 		fmt.Println(strings.Repeat("=", 80))
 		fmt.Printf("JIRA activity since %s\n", since.Format(time.RFC3339))
@@ -795,10 +1064,31 @@ func main() {
 		}
 	}
 
-	issues, err := fetchUpdatedIssues(since, projects, *unassignedQA)
+	issues, err := fetchUpdatedIssues(since, projects, mode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error fetching issues:", err)
 		os.Exit(1)
+	}
+
+	// PM mode: aggregate and print summary, then exit.
+	if mode == modePM {
+		summary, err := collectPMData(issues, since)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error collecting PM data:", err)
+			os.Exit(1)
+		}
+		printPMSummary(summary, *output)
+		if !*dryRun {
+			saveLastRun(time.Now().UTC())
+			appendHistory("go", sinceType, sinceValue)
+		}
+		return
+	}
+
+	// Select extractor for event-based modes.
+	extractor := issueExtractor(extractNormalActivity)
+	if mode == modeUnassignedQA {
+		extractor = extractUnassignedQAActivity
 	}
 
 	type result struct {
@@ -813,7 +1103,7 @@ func main() {
 		wg.Add(1)
 		go func(i int, issue Issue) {
 			defer wg.Done()
-			events, err := extractRelevantActivity(issue, since, accountID, *unassignedQA)
+			events, err := extractor(issue, since, accountID)
 			results[i] = result{issue: issue, events: events, err: err}
 		}(i, issue)
 	}

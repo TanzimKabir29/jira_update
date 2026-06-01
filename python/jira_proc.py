@@ -107,12 +107,14 @@ def fetch_my_account_id():
     return account_id
 
 
-def fetch_updated_issues(since, projects=None, unassigned_qa=False):
+def fetch_updated_issues(since, projects=None, mode="normal"):
 
     since_str = since.strftime("%Y-%m-%d %H:%M")
 
-    if unassigned_qa:
+    if mode == "unassigned_qa":
         jql = f'status changed by currentUser() after "{since_str}"'
+    elif mode == "pm":
+        jql = f'updated >= "{since_str}"'
     else:
         jql = f'assignee was currentUser() AND updated >= "{since_str}"'
     if projects:
@@ -183,40 +185,260 @@ def fetch_issue_changelog(issue_key):
 # ACTIVITY EXTRACTION
 # =========================================================
 
-def extract_relevant_activity(issue, since, account_id, unassigned_qa=False):
+def extract_normal_activity(issue, since, account_id):
     """
-    Extract only activity relevant to the current user.
-    Shows events where the user was the assignee at the time of the event.
-    When unassigned_qa is True, shows only status changes made by the user
-    from a QA column (any status containing 'qa') to another status.
+    Default mode: show assignee changes, status changes, and comments
+    for tickets where the user was assigned at the time of the event.
     """
-
     issue_key = issue["key"]
     summary = issue["fields"]["summary"]
 
     histories = fetch_issue_changelog(issue["key"])
+    sorted_histories = sorted(histories, key=lambda h: parse_jira_time(h["created"]))
 
-    if unassigned_qa:
-        sorted_histories = sorted(histories, key=lambda h: parse_jira_time(h["created"]))
-        relevant_events = []
-        for history in sorted_histories:
-            created = parse_jira_time(history["created"])
-            if created < since:
-                continue
-            if history["author"].get("accountId") != account_id:
-                continue
-            for item in history.get("items", []):
-                if item["field"] == "status" and "qa" in item.get("fromString", "").lower():
+    assignee_timeline = []
+    initial_assignee = None
+    found_first_change = False
+
+    for h in sorted_histories:
+        for item in h.get("items", []):
+            if item["field"] == "assignee":
+                if not found_first_change:
+                    initial_assignee = item.get("from")
+                    found_first_change = True
+                assignee_timeline.append((parse_jira_time(h["created"]), item.get("to")))
+
+    if not found_first_change:
+        current = issue["fields"]["assignee"]
+        initial_assignee = current["accountId"] if current else None
+
+    def was_assigned_at(t):
+        current = initial_assignee
+        for change_time, to_id in assignee_timeline:
+            if change_time <= t:
+                current = to_id
+            else:
+                break
+        return current == account_id
+
+    relevant_events = []
+
+    for history in sorted_histories:
+        created = parse_jira_time(history["created"])
+        if created < since:
+            continue
+        author = history["author"]["displayName"]
+
+        for item in history.get("items", []):
+            field = item["field"]
+            if field == "assignee":
+                from_account = item.get("from")
+                to_account = item.get("to")
+                if from_account == account_id or to_account == account_id:
+                    from_name = item.get("fromString") or "Unassigned"
+                    to_name = item.get("toString") or "Unassigned"
                     relevant_events.append({
                         "time": created,
                         "text": (
                             f"[{format_time(created)}] "
-                            f"{history['author']['displayName']} changed status "
+                            f"{author} changed assignee "
+                            f"from '{from_name}' to '{to_name}'"
+                        )
+                    })
+            elif field == "status":
+                if was_assigned_at(created):
+                    relevant_events.append({
+                        "time": created,
+                        "text": (
+                            f"[{format_time(created)}] "
+                            f"{author} changed status "
                             f"from '{item.get('fromString')}' to '{item.get('toString')}'"
                         )
                     })
-        relevant_events.sort(key=lambda x: x["time"])
-        return {"key": issue_key, "summary": summary, "events": relevant_events}
+
+    for comment in issue["fields"].get("comment", {}).get("comments", []):
+        created = parse_jira_time(comment["created"])
+        if created < since:
+            continue
+        if was_assigned_at(created):
+            relevant_events.append({
+                "time": created,
+                "text": (
+                    f"[{format_time(created)}] "
+                    f"{comment['author']['displayName']} commented"
+                )
+            })
+
+    relevant_events.sort(key=lambda x: x["time"])
+    return {"key": issue_key, "summary": summary, "events": relevant_events}
+
+
+def extract_unassigned_qa_activity(issue, since, account_id):
+    """
+    Unassigned-QA mode: show only status changes made by the user
+    from a QA column (any status containing 'qa') to another status.
+    """
+    issue_key = issue["key"]
+    summary = issue["fields"]["summary"]
+
+    histories = fetch_issue_changelog(issue["key"])
+    sorted_histories = sorted(histories, key=lambda h: parse_jira_time(h["created"]))
+
+    relevant_events = []
+    for history in sorted_histories:
+        created = parse_jira_time(history["created"])
+        if created < since:
+            continue
+        if history["author"].get("accountId") != account_id:
+            continue
+        for item in history.get("items", []):
+            if item["field"] == "status" and "qa" in item.get("fromString", "").lower():
+                relevant_events.append({
+                    "time": created,
+                    "text": (
+                        f"[{format_time(created)}] "
+                        f"{history['author']['displayName']} changed status "
+                        f"from '{item.get('fromString')}' to '{item.get('toString')}'"
+                    )
+                })
+    relevant_events.sort(key=lambda x: x["time"])
+    return {"key": issue_key, "summary": summary, "events": relevant_events}
+
+
+# =========================================================
+# PM MODE
+# =========================================================
+
+_TERMINAL_STATUSES = {"done", "released", "closed", "cancelled", "canceled"}
+
+
+def is_terminal_status(s):
+    return s.lower() in _TERMINAL_STATUSES
+
+
+def collect_pm_data(issues, since):
+    from collections import defaultdict
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def process_issue(issue):
+        histories = fetch_issue_changelog(issue["key"])
+        transitions = defaultdict(int)
+        team_activity = defaultdict(int)
+        completed_tickets = []
+        had_status_change = False
+        completed_seen = False
+
+        for history in histories:
+            created = parse_jira_time(history["created"])
+            if created < since:
+                continue
+            for item in history.get("items", []):
+                if item["field"] != "status":
+                    continue
+                had_status_change = True
+                key = (item.get("fromString", ""), item.get("toString", ""))
+                transitions[key] += 1
+                team_activity[history["author"]["displayName"]] += 1
+                if not completed_seen and is_terminal_status(item.get("toString", "")):
+                    completed_tickets.append({
+                        "key": issue["key"],
+                        "summary": issue["fields"]["summary"],
+                    })
+                    completed_seen = True
+
+        return {
+            "key": issue["key"],
+            "transitions": dict(transitions),
+            "team_activity": dict(team_activity),
+            "completed_tickets": completed_tickets,
+            "had_status_change": had_status_change,
+        }
+
+    transitions = defaultdict(int)
+    unique_tickets_moved = set()
+    completed_tickets = []
+    team_activity = defaultdict(int)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(process_issue, issue): issue for issue in issues}
+        for future in as_completed(futures):
+            issue = futures[future]
+            try:
+                r = future.result()
+            except Exception as e:
+                print(f"Warning: skipping {issue['key']}: {e}", file=sys.stderr)
+                continue
+            if r["had_status_change"]:
+                unique_tickets_moved.add(r["key"])
+            for k, v in r["transitions"].items():
+                transitions[k] += v
+            for k, v in r["team_activity"].items():
+                team_activity[k] += v
+            completed_tickets.extend(r["completed_tickets"])
+
+    return {
+        "transitions": dict(transitions),
+        "unique_tickets_moved": unique_tickets_moved,
+        "completed_tickets": completed_tickets,
+        "team_activity": dict(team_activity),
+    }
+
+
+def print_pm_summary(data, output_format):
+    import json as _json
+
+    transitions_sorted = sorted(
+        [{"from": k[0], "to": k[1], "count": v} for k, v in data["transitions"].items()],
+        key=lambda x: (x["from"], x["to"]),
+    )
+    team_sorted = sorted(
+        [{"name": k, "count": v} for k, v in data["team_activity"].items()],
+        key=lambda x: (-x["count"], x["name"]),
+    )
+    completed = sorted(data["completed_tickets"], key=lambda x: x["key"])
+
+    if output_format == "json":
+        out = {
+            "transitions": transitions_sorted,
+            "unique_tickets_moved": len(data["unique_tickets_moved"]),
+            "completed_tickets": completed,
+            "team_activity": team_sorted,
+        }
+        print(_json.dumps(out, indent=2))
+        return
+
+    print("Status Transitions")
+    print("-" * 80)
+    if not transitions_sorted:
+        print("  No status changes found.")
+    else:
+        max_len = max(len(f"  {t['from']} → {t['to']}") for t in transitions_sorted)
+        for t in transitions_sorted:
+            label = f"  {t['from']} → {t['to']}"
+            print(f"{label:<{max_len}}    {t['count']}")
+    print()
+
+    print(f"Unique tickets moved: {len(data['unique_tickets_moved'])}")
+    print()
+
+    print(f"Completed this period: {len(completed)}")
+    for iss in completed:
+        print(f"  {iss['key']} - {iss['summary']}")
+    print()
+
+    print("Team activity")
+    print("-" * 80)
+    max_len = max((len(m["name"]) for m in team_sorted), default=0)
+    for m in team_sorted:
+        print(f"  {m['name']:<{max_len}}    {m['count']}")
+
+
+def extract_relevant_activity(issue, since, account_id, unassigned_qa=False):
+    """Compatibility shim — use extract_normal_activity or extract_unassigned_qa_activity directly."""
+    if unassigned_qa:
+        return extract_unassigned_qa_activity(issue, since, account_id)
+    return extract_normal_activity(issue, since, account_id)
+
 
 
     # Sort all changelog entries chronologically
@@ -521,6 +743,11 @@ def main():
         help='Reserved for future use',
     )
     parser.add_argument(
+        '--pm',
+        action='store_true',
+        help='Show a project-wide summary of ticket movements',
+    )
+    parser.add_argument(
         '--log',
         nargs='?',
         const=20,
@@ -595,15 +822,39 @@ def main():
         print("=" * 80)
         print()
 
+    mode_flags = sum([args.unassigned_qa, args.assigned_qa, args.pm])
+    if mode_flags > 1:
+        print("Error: --pm, --unassigned-qa, and --assigned-qa are mutually exclusive.", file=sys.stderr)
+        sys.exit(1)
+
+    mode = "normal"
+    if args.unassigned_qa:
+        mode = "unassigned_qa"
+    if args.pm:
+        mode = "pm"
+        if not args.project:
+            print("Error: --pm requires --project to limit scope.", file=sys.stderr)
+            sys.exit(1)
+
     projects = [k.strip().upper() for k in args.project.split(",")] if args.project else None
-    issues = fetch_updated_issues(since, projects=projects, unassigned_qa=args.unassigned_qa)
+    issues = fetch_updated_issues(since, projects=projects, mode=mode)
+
+    if mode == "pm":
+        data = collect_pm_data(issues, since)
+        print_pm_summary(data, args.output)
+        if not args.dry_run:
+            save_last_run(datetime.now(timezone.utc))
+            append_history("python", since_type, since_value)
+        return
+
+    extractor = extract_unassigned_qa_activity if mode == "unassigned_qa" else extract_normal_activity
 
     issue_activity = []
     has_error = False
 
     for issue in issues:
         try:
-            activity = extract_relevant_activity(issue, since, account_id, unassigned_qa=args.unassigned_qa)
+            activity = extractor(issue, since, account_id)
         except Exception as e:
             print(f"Warning: skipping {issue['key']}: {e}", file=sys.stderr)
             has_error = True

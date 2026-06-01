@@ -52,7 +52,7 @@ Download `jira-update-windows-amd64.exe`, rename it to `jira-update.exe`, and pl
 
 ### Python (alternative)
 
-Requires Python 3.9+ and [pipx](https://pipx.pypa.io/stable/installation/).
+Requires Python 3.11+ and [pipx](https://pipx.pypa.io/stable/installation/).
 
 ```bash
 pipx install "git+https://github.com/TanzimKabir29/jira_update@v1.0.0#subdirectory=python"
@@ -78,6 +78,10 @@ Flags:
   --unassigned-qa  Show only tickets where you moved a status from a QA
                    column (any status containing "qa") to another status
   --assigned-qa    Reserved for future use
+  --pm             Project-wide summary: status transition counts, unique
+                   tickets moved, completed tickets, and team activity.
+                   Requires --project. Mutually exclusive with the other
+                   mode flags above.
   --output FORMAT  Output format: json
   --log [N]        Show run history (default 20 entries)
   --log-n N        Show last N entries of run history (0 = all)
@@ -104,6 +108,12 @@ jira-update --dry-run
 
 # Machine-readable output
 jira-update --output json
+
+# Tickets you moved out of a QA column today
+jira-update --since 1d --unassigned-qa
+
+# PM summary for a project this week
+jira-update --since monday --project PROJ --pm
 ```
 
 ---
@@ -113,8 +123,8 @@ jira-update --output json
 On each run the tool fetches all Jira issues updated since the previous run, then filters activity down to only what involves you:
 
 - Tickets assigned to or unassigned from you
-- Status changes on tickets currently assigned to you
-- Comments on tickets currently assigned to you
+- Status changes on tickets where you were the assignee at the time of the change
+- Comments on tickets where you were the assignee at the time of the comment
 
 The timestamp of each run is saved to `~/.jira_update/state.json`. On first run it defaults to the last 24 hours.
 
