@@ -109,7 +109,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install pipx
         run: pip install pipx
+      - name: Add pipx bin to PATH
+        run: echo "$(python -m pipx environment --value PIPX_BIN_DIR)" >> $GITHUB_PATH
       - name: Install package via pipx
-        run: pipx install ./python
+        run: python -m pipx install ./python
       - name: Verify install
-        run: ~/.local/bin/jira-update --version
+        run: jira-update --version
